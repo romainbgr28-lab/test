@@ -76,7 +76,8 @@ export async function POST(request: Request) {
     subject,
     platform,
     language,
-    nicheInstructions,
+    scriptInstructions,
+    viralityInstructions,
     duration,
     model,
     apiKey,
@@ -86,7 +87,8 @@ export async function POST(request: Request) {
     subject: string;
     platform: Platform;
     language: Language;
-    nicheInstructions: string;
+    scriptInstructions: string;
+    viralityInstructions?: string;
     duration: number;
     model: string;
     apiKey?: string;
@@ -102,11 +104,11 @@ export async function POST(request: Request) {
     );
   }
 
-  if (!subject || !platform || !language || !nicheInstructions || !duration || !model) {
+  if (!subject || !platform || !language || !scriptInstructions || !duration || !model) {
     return NextResponse.json({ error: "Paramètres manquants pour générer le script." }, { status: 400 });
   }
 
-  const systemPrompt = buildScriptSystemPrompt({ platform, language, nicheInstructions, duration, subject });
+  const systemPrompt = buildScriptSystemPrompt({ platform, language, scriptInstructions, viralityInstructions, duration, subject });
 
   // Régénération d'un segment unique : pas de recherche web ni de boucle, réponse JSON classique.
   if (regenerateSegmentOrder && existingSegment) {

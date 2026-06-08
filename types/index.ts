@@ -5,9 +5,18 @@ export type Language = "fr" | "en";
 export interface NicheProfile {
   id: string;
   name: string;
-  instructions: string;
+  scriptInstructions: string;
+  viralityInstructions: string;
   platform: Platform;
   language: Language;
+  createdAt: string;
+}
+
+export interface VisualStyle {
+  id: string;
+  name: string;
+  stylePrompt: string;
+  referenceImages: string[];
   createdAt: string;
 }
 

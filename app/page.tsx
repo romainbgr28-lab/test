@@ -11,6 +11,7 @@ import type {
   VideoProject,
   VideoSegment,
   ViralityScore,
+  VisualStyle,
   VoiceId,
 } from "@/types";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
@@ -78,8 +79,8 @@ export default function Home() {
   const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
-  const [referenceImage, setReferenceImage] = React.useState<string | undefined>(undefined);
-  const [promptStyleSuffix, setPromptStyleSuffix] = React.useState("");
+  const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
+  const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
   const [leonardoCreditsUsed, setLeonardoCreditsUsed] = React.useState(0);
 
   const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
@@ -116,7 +117,8 @@ export default function Home() {
           subject: config.subject,
           platform: config.platform,
           language: config.language,
-          nicheInstructions: config.profile.instructions,
+          scriptInstructions: config.profile.scriptInstructions,
+          viralityInstructions: config.profile.viralityInstructions,
           duration: config.duration,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
@@ -189,7 +191,8 @@ export default function Home() {
           subject: config.subject,
           platform: config.platform,
           language: config.language,
-          nicheInstructions: config.profile.instructions,
+          scriptInstructions: config.profile.scriptInstructions,
+          viralityInstructions: config.profile.viralityInstructions,
           duration: config.duration,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
@@ -232,7 +235,8 @@ export default function Home() {
     const segment = segments[index];
     const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
     const base = segment.imagePrompt?.trim() || suggested;
-    const prompt = promptStyleSuffix.trim() ? `${base}, ${promptStyleSuffix.trim()}` : base;
+    const stylePrompt = selectedVisualStyle?.stylePrompt.trim();
+    const prompt = stylePrompt ? `${base}, ${stylePrompt}` : base;
     return { prompt, isVariation };
   }
 
@@ -240,14 +244,9 @@ export default function Home() {
     setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
   }
 
-  function handleReferenceImageUpload(file: File | null) {
-    if (!file) {
-      setReferenceImage(undefined);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => setReferenceImage(reader.result as string);
-    reader.readAsDataURL(file);
+  function handleSelectVisualStyle(style: VisualStyle | null) {
+    setSelectedVisualStyle(style);
+    setSelectedVisualStyleId(style?.id ?? null);
   }
 
   async function generateImageForSegment(
@@ -270,7 +269,10 @@ export default function Home() {
           width: dimensions.width,
           height: dimensions.height,
           apiKey: config.leonardoApiKey || undefined,
-          referenceImage: referenceImage || undefined,
+          referenceImages:
+            selectedVisualStyle && selectedVisualStyle.referenceImages.length > 0
+              ? selectedVisualStyle.referenceImages
+              : undefined,
         }),
       });
       const data = await response.json();
@@ -497,10 +499,9 @@ export default function Home() {
           imageLoadingIds={imageLoadingIds}
           onSegmentPromptChange={handleSegmentPromptChange}
           leonardoApiKey={config.leonardoApiKey}
-          referenceImage={referenceImage}
-          onReferenceImageChange={handleReferenceImageUpload}
-          promptStyleSuffix={promptStyleSuffix}
-          onPromptStyleSuffixChange={setPromptStyleSuffix}
+          selectedVisualStyleId={selectedVisualStyleId}
+          onSelectVisualStyle={handleSelectVisualStyle}
+          selectedVisualStyle={selectedVisualStyle}
           onProceed={handleProceedToVoice}
         />
       )}

@@ -1,9 +1,47 @@
 const LEONARDO_BASE = "https://cloud.leonardo.ai/api/rest/v1";
+const LEONARDO_BASE_V2 = "https://cloud.leonardo.ai/api/rest/v2";
 
 export interface LeonardoModel {
   id: string;
   name: string;
   description?: string;
+}
+
+// Modèles tiers (OpenAI / Google) intégrés par Leonardo et exposés via leur API unifiée v2
+// (https://cloud.leonardo.ai/api/rest/v2/generations avec un paramètre "model").
+// On les ajoute toujours à la liste car ils n'apparaissent pas systématiquement via /platformModels.
+export const THIRD_PARTY_LEONARDO_MODELS: LeonardoModel[] = [
+  {
+    id: "gpt-image-2",
+    name: "GPT Image 2 (OpenAI)",
+    description: "Modèle d'édition premium OpenAI — excellent pour le texte dans l'image et le respect des consignes",
+  },
+  {
+    id: "gpt-image-1.5",
+    name: "GPT Image 1.5 (OpenAI)",
+    description: "Modèle d'édition OpenAI — bon rapport qualité/coût pour des visuels précis",
+  },
+  {
+    id: "gemini-2.5-flash-image",
+    name: "Nano Banana (Gemini 2.5 Flash Image)",
+    description: "Modèle Google rapide, très bon en édition et cohérence de style à partir d'images de référence",
+  },
+  {
+    id: "nano-banana-2",
+    name: "Nano Banana 2",
+    description: "Nouvelle génération Nano Banana — qualité et cohérence visuelle accrues",
+  },
+  {
+    id: "gemini-image-2",
+    name: "Nano Banana Pro (Gemini Image 2)",
+    description: "Version Pro de Nano Banana — rendu haute fidélité, idéal pour un style visuel précis",
+  },
+];
+
+const THIRD_PARTY_MODEL_IDS = new Set(THIRD_PARTY_LEONARDO_MODELS.map((m) => m.id));
+
+export function isThirdPartyLeonardoModel(modelId: string): boolean {
+  return THIRD_PARTY_MODEL_IDS.has(modelId);
 }
 
 function authHeaders(apiKey: string): Record<string, string> {
@@ -87,7 +125,10 @@ export async function listLeonardoModels(apiKey: string): Promise<LeonardoModel[
   if (!response.ok) {
     throw new Error(data?.error ?? "Impossible de récupérer la liste des modèles Leonardo.");
   }
-  return findModelList(data) ?? [];
+  const platformModels = findModelList(data) ?? [];
+  const knownIds = new Set(platformModels.map((m) => m.id));
+  const extraThirdPartyModels = THIRD_PARTY_LEONARDO_MODELS.filter((m) => !knownIds.has(m.id));
+  return [...platformModels, ...extraThirdPartyModels];
 }
 
 async function uploadInitImage(apiKey: string, dataUrl: string): Promise<string> {
@@ -227,4 +268,66 @@ export async function generateImageWithLeonardo(params: {
   const contentType = imageResponse.headers.get("content-type") || "image/png";
 
   return { imageUrl: `data:${contentType};base64,${base64}`, apiCreditCost: job.apiCreditCost };
+}
+
+interface ImageReferenceGuidance {
+  image: { id: string; type: "UPLOADED" };
+}
+
+// Les modèles tiers (GPT Image, Nano Banana...) passent par l'API unifiée v2 de Leonardo,
+// qui accepte un identifiant de modèle "byo" et jusqu'à 4 images de référence via
+// guidances.image_reference (cf. docs.leonardo.ai/docs/gpt-image-2 et /docs/nano-banana).
+export async function generateImageWithLeonardoV2(params: {
+  prompt: string;
+  apiKey: string;
+  modelId: string;
+  width: number;
+  height: number;
+  referenceImages?: string[];
+}): Promise<LeonardoGenerationResult> {
+  const { prompt, apiKey, modelId, width, height, referenceImages } = params;
+
+  let imageReference: ImageReferenceGuidance[] | undefined;
+  if (referenceImages && referenceImages.length > 0) {
+    const ids = await Promise.all(referenceImages.slice(0, 4).map((image) => uploadInitImage(apiKey, image)));
+    imageReference = ids.map((id) => ({ image: { id, type: "UPLOADED" as const } }));
+  }
+
+  const body: Record<string, unknown> = {
+    model: modelId,
+    prompt,
+    width,
+    height,
+    quantity: 1,
+  };
+  if (imageReference) {
+    body.guidances = { image_reference: imageReference };
+  }
+
+  const response = await fetch(`${LEONARDO_BASE_V2}/generations`, {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify(body),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.error ?? `Échec du lancement de la génération Leonardo (${modelId}).`);
+  }
+
+  const generationId: string | undefined =
+    data?.sdGenerationJob?.generationId ?? data?.generationId ?? data?.id;
+  if (!generationId) {
+    throw new Error("Réponse inattendue de Leonardo (identifiant de génération manquant).");
+  }
+  const apiCreditCost: number | undefined = data?.sdGenerationJob?.apiCreditCost ?? data?.apiCreditCost;
+
+  const imageUrl = await pollGeneration(generationId, apiKey);
+
+  const imageResponse = await fetch(imageUrl);
+  if (!imageResponse.ok) throw new Error("Échec du téléchargement de l'image générée par Leonardo.");
+  const arrayBuffer = await imageResponse.arrayBuffer();
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  const contentType = imageResponse.headers.get("content-type") || "image/png";
+
+  return { imageUrl: `data:${contentType};base64,${base64}`, apiCreditCost };
 }

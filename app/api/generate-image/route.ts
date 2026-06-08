@@ -1,18 +1,18 @@
 import { NextResponse } from "next/server";
-import { generateImageWithLeonardo } from "@/lib/leonardo";
+import { generateImageWithLeonardo, generateImageWithLeonardoV2, isThirdPartyLeonardoModel } from "@/lib/leonardo";
 
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, model, width, height, apiKey, referenceImage } = body as {
+    const { prompt, model, width, height, apiKey, referenceImages } = body as {
       prompt: string;
       model: string;
       width: number;
       height: number;
       apiKey?: string;
-      referenceImage?: string;
+      referenceImages?: string[];
     };
 
     if (!prompt || !model || !width || !height) {
@@ -31,13 +31,25 @@ export async function POST(request: Request) {
     }
 
     try {
+      if (isThirdPartyLeonardoModel(model)) {
+        const { imageUrl, apiCreditCost } = await generateImageWithLeonardoV2({
+          prompt,
+          apiKey: key,
+          modelId: model,
+          width,
+          height,
+          referenceImages,
+        });
+        return NextResponse.json({ imageUrl, apiCreditCost });
+      }
+
       const { imageUrl, apiCreditCost } = await generateImageWithLeonardo({
         prompt,
         apiKey: key,
         modelId: model,
         width,
         height,
-        referenceImage,
+        referenceImage: referenceImages?.[0],
       });
       return NextResponse.json({ imageUrl, apiCreditCost });
     } catch (error) {

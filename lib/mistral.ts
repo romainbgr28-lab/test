@@ -18,7 +18,8 @@ const LANGUAGE_LABELS: Record<Language, string> = {
 export function buildScriptSystemPrompt(params: {
   platform: Platform;
   language: Language;
-  nicheInstructions: string;
+  scriptInstructions: string;
+  viralityInstructions?: string;
   duration: number;
   subject: string;
 }): string {
@@ -65,8 +66,8 @@ Tu as accès à un outil de recherche internet en temps réel. Utilise-le systé
 - repérer les angles et accroches qui fonctionnent déjà sur des contenus similaires, pour t'en inspirer sans copier
 N'invente jamais une statistique : si tu avances un chiffre, il doit provenir d'une recherche réelle.
 
-Niche et instructions : ${params.nicheInstructions}
-Plateforme : ${platformLabel}
+Instructions de niche / sujet du script (à respecter scrupuleusement) : ${params.scriptInstructions}
+${params.viralityInstructions?.trim() ? `Instructions de viralité et de format à privilégier pour ce profil : ${params.viralityInstructions.trim()}\n` : ""}Plateforme : ${platformLabel}
 Langue : ${languageLabel}
 
 Sujet : ${params.subject}

@@ -1,14 +1,14 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus, ArrowRight, Loader2, Upload, X, Sparkles, RefreshCw } from "lucide-react";
-import type { ImageModel, VideoSegment } from "@/types";
+import { ImagePlus, ArrowRight, Loader2, Sparkles, RefreshCw } from "lucide-react";
+import type { ImageModel, VideoSegment, VisualStyle } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { ModelSelector } from "../ui/ModelSelector";
 import { Button } from "../ui/Button";
-import { Input } from "../ui/Input";
 import { Textarea } from "../ui/Textarea";
 import { Skeleton } from "../ui/Skeleton";
+import { VisualStyleManager } from "../ui/VisualStyleManager";
 
 function buildImageModelOptions(leonardoModels: { id: string; name: string; description?: string }[]) {
   return leonardoModels.map((m) => ({
@@ -29,10 +29,9 @@ interface StepImagesProps {
   imageLoadingIds: Set<string>;
   onSegmentPromptChange: (id: string, imagePrompt: string) => void;
   leonardoApiKey?: string;
-  referenceImage?: string;
-  onReferenceImageChange: (file: File | null) => void;
-  promptStyleSuffix: string;
-  onPromptStyleSuffixChange: (value: string) => void;
+  selectedVisualStyleId: string | null;
+  onSelectVisualStyle: (style: VisualStyle | null) => void;
+  selectedVisualStyle: VisualStyle | null;
   onProceed: () => void;
 }
 
@@ -47,15 +46,13 @@ export function StepImages({
   imageLoadingIds,
   onSegmentPromptChange,
   leonardoApiKey,
-  referenceImage,
-  onReferenceImageChange,
-  promptStyleSuffix,
-  onPromptStyleSuffixChange,
+  selectedVisualStyleId,
+  onSelectVisualStyle,
+  selectedVisualStyle,
   onProceed,
 }: StepImagesProps) {
   const [leonardoModels, setLeonardoModels] = React.useState<{ id: string; name: string; description?: string }[]>([]);
   const imageModelOptions = React.useMemo(() => buildImageModelOptions(leonardoModels), [leonardoModels]);
-  const fileInputRef = React.useRef<HTMLInputElement>(null);
 
   React.useEffect(() => {
     if (!leonardoApiKey) {
@@ -116,47 +113,27 @@ export function StepImages({
               options={imageModelOptions}
             />
 
-            <div className="flex flex-col gap-1.5">
-              <label className="text-sm font-medium text-foreground">Style ajouté à tous les prompts (optionnel)</label>
-              <Input
-                value={promptStyleSuffix}
-                onChange={(e) => onPromptStyleSuffixChange(e.target.value)}
-                placeholder="ex. cinematic lighting, ultra detailed, 8k"
-              />
-              <p className="text-xs text-muted-foreground">Ajouté à la fin de chaque prompt avant la génération.</p>
-            </div>
-
             <div className="flex flex-col gap-1.5 lg:col-span-2">
-              <label className="text-sm font-medium text-foreground">Image de référence (optionnel)</label>
-              <p className="text-xs text-muted-foreground">
-                Sert de base visuelle pour guider le style et la composition (image guidance), compatible avec tous les
-                modèles Leonardo.
-              </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                className="hidden"
-                onChange={(e) => onReferenceImageChange(e.target.files?.[0] ?? null)}
-              />
-              {referenceImage ? (
-                <div className="flex items-center gap-3">
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={referenceImage}
-                    alt="Image de référence"
-                    className="h-16 w-16 rounded-md border border-border object-cover"
-                  />
-                  <Button variant="outline" size="sm" onClick={() => onReferenceImageChange(null)}>
-                    <X className="h-4 w-4" />
-                    Retirer
-                  </Button>
+              <VisualStyleManager selectedId={selectedVisualStyleId} onSelect={onSelectVisualStyle} />
+              {selectedVisualStyle && (
+                <div className="mt-1 flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-3">
+                  <p className="text-xs text-muted-foreground">
+                    Prompt de style appliqué à tous les segments : « {selectedVisualStyle.stylePrompt} »
+                  </p>
+                  {selectedVisualStyle.referenceImages.length > 0 && (
+                    <div className="flex flex-wrap gap-2">
+                      {selectedVisualStyle.referenceImages.map((src, index) => (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          key={index}
+                          src={src}
+                          alt={`Référence de style ${index + 1}`}
+                          className="h-14 w-14 rounded-md border border-border object-cover"
+                        />
+                      ))}
+                    </div>
+                  )}
                 </div>
-              ) : (
-                <Button variant="outline" size="sm" className="w-fit" onClick={() => fileInputRef.current?.click()}>
-                  <Upload className="h-4 w-4" />
-                  Importer une image
-                </Button>
               )}
             </div>
           </CardContent>
@@ -213,7 +190,7 @@ export function StepImages({
                   <div className="flex flex-1 flex-col gap-3">
                     <div className="flex flex-col gap-1.5">
                       <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                        Prompt image (modifiable)
+                        Prompt de contenu (ce qui doit apparaître dans l&apos;image)
                       </label>
                       <Textarea
                         value={segment.imagePrompt ?? ""}
@@ -222,7 +199,9 @@ export function StepImages({
                         className="min-h-[140px] text-sm leading-relaxed"
                       />
                       <p className="text-xs text-muted-foreground">
-                        Laisse vide pour utiliser la description visuelle générée à partir du script.
+                        Décrit le sujet et la composition de cette image précise. Laisse vide pour utiliser la
+                        description visuelle générée à partir du script. Le style visuel sélectionné ci-dessus
+                        (rendu, ambiance, images de référence) est automatiquement combiné à ce prompt.
                       </p>
                     </div>
                     <div className="flex flex-wrap gap-2">

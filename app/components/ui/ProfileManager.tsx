@@ -33,7 +33,8 @@ export function ProfileManager({ selectedId, onSelect }: ProfileManagerProps) {
   const [profiles, setProfiles] = React.useState<NicheProfile[]>([]);
   const [creating, setCreating] = React.useState(false);
   const [name, setName] = React.useState("");
-  const [instructions, setInstructions] = React.useState("");
+  const [scriptInstructions, setScriptInstructions] = React.useState("");
+  const [viralityInstructions, setViralityInstructions] = React.useState("");
   const [platform, setPlatform] = React.useState<Platform>("tiktok");
   const [language, setLanguage] = React.useState<Language>("fr");
 
@@ -47,16 +48,27 @@ export function ProfileManager({ selectedId, onSelect }: ProfileManagerProps) {
   }, []);
 
   function handleCreate() {
-    if (!name.trim() || !instructions.trim()) {
-      toast({ title: "Champs manquants", description: "Donne un nom et des instructions à ton profil.", variant: "error" });
+    if (!name.trim() || !scriptInstructions.trim()) {
+      toast({
+        title: "Champs manquants",
+        description: "Donne un nom et au moins des instructions de script à ton profil.",
+        variant: "error",
+      });
       return;
     }
-    const profile = saveProfile({ name: name.trim(), instructions: instructions.trim(), platform, language });
+    const profile = saveProfile({
+      name: name.trim(),
+      scriptInstructions: scriptInstructions.trim(),
+      viralityInstructions: viralityInstructions.trim(),
+      platform,
+      language,
+    });
     setProfiles(getProfiles());
     onSelect(profile);
     setCreating(false);
     setName("");
-    setInstructions("");
+    setScriptInstructions("");
+    setViralityInstructions("");
     toast({ title: "Profil créé", description: `"${profile.name}" est prêt à être utilisé.`, variant: "success" });
   }
 
@@ -88,10 +100,17 @@ export function ProfileManager({ selectedId, onSelect }: ProfileManagerProps) {
         options={profiles.map((p) => ({
           value: p.id,
           label: p.name,
-          description: p.instructions.slice(0, 70) + (p.instructions.length > 70 ? "…" : ""),
+          description: p.scriptInstructions.slice(0, 70) + (p.scriptInstructions.length > 70 ? "…" : ""),
         }))}
-        placeholder="Choisis un profil"
+        placeholder={profiles.length > 0 ? "Choisis un profil" : "Aucun profil — crées-en un ci-dessous"}
       />
+
+      {profiles.length === 0 && !creating && (
+        <p className="text-xs text-muted-foreground">
+          Tu n&apos;as encore aucun profil. Crée-en un pour définir tes propres instructions de script et de viralité —
+          rien n&apos;est pré-rempli, c&apos;est toi qui définis tout.
+        </p>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {profiles.map((p) => (
@@ -115,17 +134,34 @@ export function ProfileManager({ selectedId, onSelect }: ProfileManagerProps) {
           <CardContent className="flex flex-col gap-3">
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Nom</label>
-              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Tech FR" />
+              <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="Ex: Fitness perte de gras FR" />
             </div>
             <div className="flex flex-col gap-1.5">
               <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                Instructions de niche
+                Instructions de script
               </label>
               <Textarea
-                value={instructions}
-                onChange={(e) => setInstructions(e.target.value)}
-                placeholder="Décris le ton, le public cible, les sujets favoris..."
+                value={scriptInstructions}
+                onChange={(e) => setScriptInstructions(e.target.value)}
+                placeholder="Ex: Scripts pour vidéos fitness sur la perte de gras, ton motivant, exemples concrets, vocabulaire simple, public 20-35 ans..."
               />
+              <p className="text-xs text-muted-foreground">
+                Décrit le ton, le sujet, le public cible et la structure attendue du script généré par l&apos;IA.
+              </p>
+            </div>
+            <div className="flex flex-col gap-1.5">
+              <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                Instructions de viralité / format (optionnel)
+              </label>
+              <Textarea
+                value={viralityInstructions}
+                onChange={(e) => setViralityInstructions(e.target.value)}
+                placeholder="Ex: Privilégier les hooks chocs avec chiffres, formats listicle 'top 5', rythme rapide, CTA vers le profil..."
+              />
+              <p className="text-xs text-muted-foreground">
+                Décrit les mécaniques de viralité et de format que l&apos;IA doit privilégier pour ce type de contenu
+                (hook, rythme, structure, type de CTA...).
+              </p>
             </div>
             <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="flex flex-col gap-1.5">
