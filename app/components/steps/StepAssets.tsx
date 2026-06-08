@@ -1,16 +1,18 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus, Mic, ArrowRight, Loader2 } from "lucide-react";
+import { ImagePlus, Mic, ArrowRight, Loader2, Upload, X } from "lucide-react";
 import type { ImageModel, VideoSegment, VoiceId } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { ModelSelector } from "../ui/ModelSelector";
 import { Select } from "../ui/Select";
 import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
+import { Textarea } from "../ui/Textarea";
 import { AudioPlayer } from "../ui/AudioPlayer";
 import { Skeleton } from "../ui/Skeleton";
 import { IMAGE_COSTS } from "@/lib/cost-calculator";
-import { VOICE_DESCRIPTIONS } from "@/lib/pollinations";
+import { IMAGE_EDIT_MODELS, VOICE_DESCRIPTIONS, modelSupportsReferenceImage } from "@/lib/pollinations";
 
 const FALLBACK_IMAGE_MODELS = Object.keys(IMAGE_COSTS) as ImageModel[];
 
@@ -36,6 +38,11 @@ interface StepAssetsProps {
   onGenerateImageVariation: (id: string) => void;
   generatingImages: boolean;
   imageLoadingIds: Set<string>;
+  onSegmentPromptChange: (id: string, imagePrompt: string) => void;
+  referenceImage?: string;
+  onReferenceImageChange: (file: File | null) => void;
+  promptStyleSuffix: string;
+  onPromptStyleSuffixChange: (value: string) => void;
   voiceId: VoiceId;
   onVoiceChange: (voice: VoiceId) => void;
   onGenerateVoice: () => void;
@@ -53,6 +60,11 @@ export function StepAssets({
   onGenerateImageVariation,
   generatingImages,
   imageLoadingIds,
+  onSegmentPromptChange,
+  referenceImage,
+  onReferenceImageChange,
+  promptStyleSuffix,
+  onPromptStyleSuffixChange,
   voiceId,
   onVoiceChange,
   onGenerateVoice,
@@ -63,6 +75,8 @@ export function StepAssets({
   const [imageModelOptions, setImageModelOptions] = React.useState(() =>
     buildImageModelOptions(FALLBACK_IMAGE_MODELS)
   );
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const supportsReference = modelSupportsReferenceImage(imageModel);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -106,6 +120,59 @@ export function StepAssets({
                 onChange={(v) => onImageModelChange(v as ImageModel)}
                 options={imageModelOptions}
               />
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">Image de référence (optionnel)</label>
+                <p className="text-xs text-muted-foreground">
+                  Sert de base visuelle pour guider le style et la composition. Compatible avec les modèles d'édition :{" "}
+                  {IMAGE_EDIT_MODELS.join(", ")}.
+                </p>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => onReferenceImageChange(e.target.files?.[0] ?? null)}
+                />
+                {referenceImage ? (
+                  <div className="flex items-center gap-3">
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={referenceImage}
+                      alt="Image de référence"
+                      className="h-16 w-16 rounded-md border border-border object-cover"
+                    />
+                    <Button variant="outline" size="sm" onClick={() => onReferenceImageChange(null)}>
+                      <X className="h-4 w-4" />
+                      Retirer
+                    </Button>
+                  </div>
+                ) : (
+                  <Button variant="outline" size="sm" className="w-fit" onClick={() => fileInputRef.current?.click()}>
+                    <Upload className="h-4 w-4" />
+                    Importer une image
+                  </Button>
+                )}
+                {referenceImage && !supportsReference && (
+                  <p className="text-xs text-amber-500">
+                    Le modèle « {imageModel} » ignore l'image de référence : choisis un modèle d'édition ci-dessus
+                    pour l'utiliser.
+                  </p>
+                )}
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <label className="text-sm font-medium text-foreground">Style ajouté à tous les prompts (optionnel)</label>
+                <Input
+                  value={promptStyleSuffix}
+                  onChange={(e) => onPromptStyleSuffixChange(e.target.value)}
+                  placeholder="ex. cinematic lighting, ultra detailed, 8k"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Ajouté à la fin de chaque prompt pour garder une cohérence visuelle et limiter les générations ratées.
+                </p>
+              </div>
+
               <div className="flex items-center justify-between">
                 <Button onClick={onGenerateAllImages} disabled={generatingImages}>
                   {generatingImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
@@ -144,6 +211,12 @@ export function StepAssets({
                           </span>
                         )}
                       </div>
+                      <Textarea
+                        value={segment.imagePrompt ?? ""}
+                        onChange={(e) => onSegmentPromptChange(segment.id, e.target.value)}
+                        placeholder={segment.visualDescription}
+                        className="min-h-[60px] text-xs"
+                      />
                       <Button
                         variant="outline"
                         size="sm"

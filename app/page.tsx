@@ -22,7 +22,7 @@ import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
 import { estimateCost, formatEur, formatPollen } from "@/lib/cost-calculator";
-import { getDimensionsForPlatform } from "@/lib/pollinations";
+import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
 
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
@@ -74,6 +74,8 @@ export default function Home() {
   const [imageModel, setImageModel] = React.useState<ImageModel>("flux");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
+  const [referenceImage, setReferenceImage] = React.useState<string | undefined>(undefined);
+  const [promptStyleSuffix, setPromptStyleSuffix] = React.useState("");
 
   const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
@@ -189,34 +191,48 @@ export default function Home() {
     toast({ title: "Script validé", description: "Passe à la génération des assets.", variant: "success" });
   }
 
-  function buildSceneContinuityPrompt(segs: VideoSegment[], index: number): { prompt: string; isVariation: boolean } {
-    const segment = segs[index];
-    const previous = segs[index - 1];
-    const isVariation = !!previous && previous.duration + segment.duration < 10;
-    if (isVariation) {
-      return {
-        prompt: `${segment.visualDescription}, same scene as previous, slight camera movement, subtle shift in framing and lighting`,
-        isVariation: true,
-      };
-    }
-    return { prompt: segment.visualDescription, isVariation: false };
+  function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean } {
+    const segment = segments[index];
+    const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
+    const base = segment.imagePrompt?.trim() || suggested;
+    const prompt = promptStyleSuffix.trim() ? `${base}, ${promptStyleSuffix.trim()}` : base;
+    return { prompt, isVariation };
   }
 
-  async function generateImageForSegment(segment: VideoSegment, promptOverride?: string): Promise<string | null> {
+  function handleSegmentPromptChange(id: string, imagePrompt: string) {
+    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
+  }
+
+  function handleReferenceImageUpload(file: File | null) {
+    if (!file) {
+      setReferenceImage(undefined);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => setReferenceImage(reader.result as string);
+    reader.readAsDataURL(file);
+  }
+
+  async function generateImageForSegment(
+    segment: VideoSegment,
+    promptOverride: string,
+    seedOverride?: number
+  ): Promise<string | null> {
     if (!config.profile) return null;
     const dimensions = getDimensionsForPlatform(config.platform);
-    const seed = segment.order * 1000;
+    const seed = seedOverride ?? segment.order * 1000;
     try {
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: promptOverride ?? segment.visualDescription,
+          prompt: promptOverride,
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
           seed,
           apiKey: config.pollinationsApiKey || undefined,
+          referenceImage: referenceImage || undefined,
         }),
       });
       const data = await response.json();
@@ -237,7 +253,7 @@ export default function Home() {
     try {
       const results = await Promise.all(
         segments.map(async (segment, index) => {
-          const { prompt, isVariation } = buildSceneContinuityPrompt(segments, index);
+          const { prompt, isVariation } = getEffectivePrompt(index);
           const imageUrl = await generateImageForSegment(segment, prompt);
           return { id: segment.id, imageUrl, isVariation };
         })
@@ -268,8 +284,10 @@ export default function Home() {
     if (index === -1) return;
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt, isVariation } = buildSceneContinuityPrompt(segments, index);
-    const imageUrl = await generateImageForSegment(segment, prompt);
+    const { prompt, isVariation } = getEffectivePrompt(index);
+    // Seed aléatoire pour éviter de regénérer une image identique et gaspiller des crédits
+    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
+    const imageUrl = await generateImageForSegment(segment, prompt, seed);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
@@ -284,11 +302,14 @@ export default function Home() {
   }
 
   async function handleGenerateImageVariation(id: string) {
-    const segment = segments.find((s) => s.id === id);
-    if (!segment) return;
+    const index = segments.findIndex((s) => s.id === id);
+    if (index === -1) return;
+    const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const prompt = `${segment.visualDescription}, slight variation, same composition, different angle`;
-    const imageUrl = await generateImageForSegment(segment, prompt);
+    const { prompt: basePrompt } = getEffectivePrompt(index);
+    const prompt = `${basePrompt}, slight variation, same composition, different angle`;
+    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
+    const imageUrl = await generateImageForSegment(segment, prompt, seed);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
@@ -430,6 +451,11 @@ export default function Home() {
           onGenerateImageVariation={handleGenerateImageVariation}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
+          onSegmentPromptChange={handleSegmentPromptChange}
+          referenceImage={referenceImage}
+          onReferenceImageChange={handleReferenceImageUpload}
+          promptStyleSuffix={promptStyleSuffix}
+          onPromptStyleSuffixChange={setPromptStyleSuffix}
           voiceId={voiceId}
           onVoiceChange={setVoiceId}
           onGenerateVoice={handleGenerateVoice}

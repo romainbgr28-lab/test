@@ -1,4 +1,4 @@
-import type { Platform, VoiceId } from "@/types";
+import type { Platform, VideoSegment, VoiceId } from "@/types";
 
 export const VOICE_DESCRIPTIONS: Record<VoiceId, string> = {
   alloy: "Alloy - Neutre, polyvalente",
@@ -23,6 +23,30 @@ export function getDimensionsForPlatform(platform: Platform): ImageDimensions {
 
 export const IMAGE_ENDPOINT = "https://gen.pollinations.ai/image";
 export const IMAGE_MODELS_ENDPOINT = "https://gen.pollinations.ai/image/models";
+export const IMAGE_EDIT_ENDPOINT = "https://gen.pollinations.ai/v1/images/edits";
+
+// Modèles capables d'utiliser une image de référence (édition / style transfer)
+export const IMAGE_EDIT_MODELS = ["kontext", "gptimage", "seedream", "klein", "nanobanana"];
+
+export function modelSupportsReferenceImage(model: string): boolean {
+  return IMAGE_EDIT_MODELS.includes(model);
+}
+
+export function buildSceneContinuityPrompt(
+  segments: VideoSegment[],
+  index: number
+): { prompt: string; isVariation: boolean } {
+  const segment = segments[index];
+  const previous = segments[index - 1];
+  const isVariation = !!previous && previous.duration + segment.duration < 10;
+  if (isVariation) {
+    return {
+      prompt: `${segment.visualDescription}, same scene as previous, slight camera movement, subtle shift in framing and lighting`,
+      isVariation: true,
+    };
+  }
+  return { prompt: segment.visualDescription, isVariation: false };
+}
 
 export function buildImageUrl(params: {
   prompt: string;
