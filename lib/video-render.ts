@@ -219,7 +219,7 @@ async function convertWebmToMp4(webm: Blob, onProgress?: (ratio: number, label: 
     ]);
     const data = await ffmpeg.readFile("output.mp4");
     const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
-    return new Blob([bytes], { type: "video/mp4" });
+    return new Blob([bytes as BlobPart], { type: "video/mp4" });
   } catch (error) {
     console.error("Conversion MP4 échouée, repli sur WebM :", error);
     return null;
