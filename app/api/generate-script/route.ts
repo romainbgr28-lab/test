@@ -8,6 +8,7 @@ import {
 import type { Language, Platform, ViralityScore } from "@/types";
 
 export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
 
 interface RawSegment {
   order: number;
@@ -33,6 +34,40 @@ const PLATFORM_LABELS: Record<Platform, string> = {
 
 function encodeEvent(event: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
+}
+
+const HEARTBEAT_PHRASES = [
+  "L'IA explore le web et croise les sources...",
+  "Analyse des hooks et des accroches qui cartonnent en ce moment...",
+  "Vérification des chiffres et des faits trouvés...",
+  "Construction de la structure narrative segment par segment...",
+  "Ajustement du rythme et des transitions pour maximiser la rétention...",
+];
+
+/**
+ * Emits periodic "still working" status updates while a long Mistral call runs,
+ * so the live log keeps moving instead of looking frozen for tens of seconds.
+ */
+async function withHeartbeat<T>(
+  task: Promise<T>,
+  send: (event: Record<string, unknown>) => void,
+  iteration: number
+): Promise<T> {
+  let tick = 0;
+  const interval = setInterval(() => {
+    send({
+      type: "status",
+      iteration,
+      message: HEARTBEAT_PHRASES[tick % HEARTBEAT_PHRASES.length],
+    });
+    tick++;
+  }, 6000);
+
+  try {
+    return await task;
+  } finally {
+    clearInterval(interval);
+  }
 }
 
 export async function POST(request: Request) {
@@ -141,7 +176,11 @@ Relance une recherche web pour creuser davantage le sujet "${subject}" (nouveaux
           let rawText: string;
           let searchQueries: string[] = [];
           try {
-            const result = await callMistralWithWebSearch({ apiKey: key, model, instructions: systemPrompt, userMessage: userPrompt });
+            const result = await withHeartbeat(
+              callMistralWithWebSearch({ apiKey: key, model, instructions: systemPrompt, userMessage: userPrompt }),
+              send,
+              iteration
+            );
             rawText = result.text;
             searchQueries = result.searchQueries;
             if (searchQueries.length > 0) {
@@ -160,14 +199,18 @@ Relance une recherche web pour creuser davantage le sujet "${subject}" (nouveaux
               iteration,
               message: "Recherche web indisponible pour le moment, génération directe avec les connaissances du modèle...",
             });
-            rawText = await callMistralChat({
-              apiKey: key,
-              model,
-              messages: [
-                { role: "system", content: systemPrompt },
-                { role: "user", content: userPrompt },
-              ],
-            });
+            rawText = await withHeartbeat(
+              callMistralChat({
+                apiKey: key,
+                model,
+                messages: [
+                  { role: "system", content: systemPrompt },
+                  { role: "user", content: userPrompt },
+                ],
+              }),
+              send,
+              iteration
+            );
           }
 
           send({ type: "status", iteration, message: "Rédaction du script et calcul du score de viralité..." });

@@ -27,7 +27,59 @@ function scoreColor(score: number): string {
   return "text-emerald-400 border-emerald-700/40 bg-emerald-500/10";
 }
 
-function LiveProgressLog({ entries }: { entries: { message: string; score?: number }[] }) {
+function ElapsedTimer({ active }: { active: boolean }) {
+  const [seconds, setSeconds] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!active) {
+      setSeconds(0);
+      return;
+    }
+    const start = Date.now();
+    const interval = setInterval(() => setSeconds(Math.floor((Date.now() - start) / 1000)), 1000);
+    return () => clearInterval(interval);
+  }, [active]);
+
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  const formatted = minutes > 0 ? `${minutes} min ${rest.toString().padStart(2, "0")} s` : `${seconds} s`;
+
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1 text-xs font-medium text-muted-foreground">
+      <Loader2 className="h-3 w-3 animate-spin" />
+      En cours depuis {formatted}
+    </span>
+  );
+}
+
+const THINKING_PHRASES = [
+  "L'IA réfléchit",
+  "Analyse des tendances",
+  "Recherche d'angles viraux",
+  "Vérification des informations",
+  "Optimisation du script",
+];
+
+function ThinkingIndicator({ active }: { active: boolean }) {
+  const [index, setIndex] = React.useState(0);
+
+  React.useEffect(() => {
+    if (!active) return;
+    const interval = setInterval(() => setIndex((i) => (i + 1) % THINKING_PHRASES.length), 2200);
+    return () => clearInterval(interval);
+  }, [active]);
+
+  return (
+    <span className="inline-flex items-center gap-1 text-sm font-medium text-foreground">
+      {THINKING_PHRASES[index]}
+      <span className="inline-flex w-5 justify-start">
+        <span className="animate-pulse">...</span>
+      </span>
+    </span>
+  );
+}
+
+function LiveProgressLog({ entries, loading }: { entries: { message: string; score?: number }[]; loading: boolean }) {
   const endRef = React.useRef<HTMLDivElement>(null);
 
   React.useEffect(() => {
@@ -35,14 +87,18 @@ function LiveProgressLog({ entries }: { entries: { message: string; score?: numb
   }, [entries.length]);
 
   return (
-    <div className="flex flex-col gap-2 rounded-md border border-border bg-secondary/20 p-4">
-      <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-        <span className="relative flex h-2 w-2">
-          <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
-          <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
-        </span>
-        L'IA travaille en direct...
+    <div className="flex flex-col gap-3 rounded-md border border-border bg-secondary/20 p-4">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-primary opacity-75" />
+            <span className="relative inline-flex h-2 w-2 rounded-full bg-primary" />
+          </span>
+          L'IA travaille en direct
+        </div>
+        <ElapsedTimer active={loading} />
       </div>
+      <ThinkingIndicator active={loading} />
       <div className="flex max-h-72 flex-col gap-1.5 overflow-y-auto pr-1">
         {entries.length === 0 && (
           <p className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -113,7 +169,7 @@ export function StepScript({
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
-          <LiveProgressLog entries={progress} />
+          <LiveProgressLog entries={progress} loading={loading} />
           <Skeleton className="h-28 w-full" />
           <Skeleton className="h-40 w-full" />
           <Skeleton className="h-40 w-full" />
