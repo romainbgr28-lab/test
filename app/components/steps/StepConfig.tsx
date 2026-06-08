@@ -48,11 +48,10 @@ export interface StepConfigState {
   mistralModel: MistralModel;
   mistralApiKey: string;
   pollinationsApiKey: string;
-  geminiApiKey: string;
   leonardoApiKey: string;
 }
 
-type ApiKeyField = "mistralApiKey" | "pollinationsApiKey" | "geminiApiKey" | "leonardoApiKey";
+type ApiKeyField = "mistralApiKey" | "pollinationsApiKey" | "leonardoApiKey";
 
 const API_KEYS_STORAGE_KEY = "studioai:apiKeys";
 
@@ -158,7 +157,7 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Clé API Pollinations</label>
+            <label className="text-sm font-medium text-foreground">Clé API Pollinations (voix off)</label>
             <Input
               type="password"
               value={state.pollinationsApiKey}
@@ -167,7 +166,7 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">
-              Obligatoire pour générer images, voix et textes. Crée une clé sur{" "}
+              Nécessaire pour générer la voix off (synthèse vocale). Crée une clé sur{" "}
               <a
                 href="https://enter.pollinations.ai"
                 target="_blank"
@@ -177,19 +176,6 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
                 enter.pollinations.ai
               </a>
               .
-            </p>
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Clé API Gemini</label>
-            <Input
-              type="password"
-              value={state.geminiApiKey}
-              onChange={(e) => updateApiKey({ geminiApiKey: e.target.value })}
-              placeholder="Laisse vide pour utiliser la clé du serveur"
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">
-              Nécessaire pour générer des images avec les modèles Gemini (Nano Banana / Imagen).
             </p>
           </div>
           <div className="flex flex-col gap-1.5">

@@ -5,7 +5,7 @@ import { Download, FileArchive, Loader2 } from "lucide-react";
 import type { VideoProject } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
-import { estimateCost, formatEur, formatPollen } from "@/lib/cost-calculator";
+import { estimateCost, formatEur } from "@/lib/cost-calculator";
 
 interface StepExportProps {
   project: VideoProject | null;
@@ -26,11 +26,7 @@ export function StepExport({ project, onExport, exporting }: StepExportProps) {
   }
 
   const totalDuration = project.segments.reduce((sum, s) => sum + s.duration, 0);
-  const cost = estimateCost({
-    mistralModel: project.mistralModel as never,
-    imageModel: project.imageModel as never,
-    segmentCount: project.segments.length,
-  });
+  const cost = estimateCost({ mistralModel: project.mistralModel as never });
 
   return (
     <Card>
@@ -49,9 +45,8 @@ export function StepExport({ project, onExport, exporting }: StepExportProps) {
             <p className="mt-1 text-2xl font-semibold">{totalDuration}s</p>
           </div>
           <div className="rounded-md border border-border bg-secondary/40 p-4">
-            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Coût estimé</p>
-            <p className="mt-1 text-2xl font-semibold">{formatEur(cost.totalEur)}</p>
-            <p className="text-xs text-muted-foreground">{formatPollen(cost.totalPollen)}</p>
+            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Coût du script</p>
+            <p className="mt-1 text-2xl font-semibold">{formatEur(cost.scriptEur)}</p>
           </div>
         </div>
 

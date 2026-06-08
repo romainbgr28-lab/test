@@ -6,14 +6,6 @@ export interface LeonardoModel {
   description?: string;
 }
 
-// L'API de génération Leonardo exige des dimensions entre 32 et 1024px, multiples de 8.
-export function clampDimensionsForLeonardo(width: number, height: number): { width: number; height: number } {
-  const maxSide = 1024;
-  const scale = Math.min(1, maxSide / Math.max(width, height));
-  const roundToMultipleOf8 = (value: number) => Math.max(32, Math.min(maxSide, Math.round((value * scale) / 8) * 8));
-  return { width: roundToMultipleOf8(width), height: roundToMultipleOf8(height) };
-}
-
 function authHeaders(apiKey: string): Record<string, string> {
   return {
     Authorization: `Bearer ${apiKey}`,
@@ -22,28 +14,83 @@ function authHeaders(apiKey: string): Record<string, string> {
   };
 }
 
+// L'API de génération Leonardo exige des dimensions multiples de 8 (32 à 1024px en général,
+// mais certains modèles imposent leurs propres valeurs — voir le mécanisme de correction
+// automatique dans generateImageWithLeonardo).
+export function clampDimensionsForLeonardo(width: number, height: number): { width: number; height: number } {
+  const maxSide = 1024;
+  const scale = Math.min(1, maxSide / Math.max(width, height));
+  const roundToMultipleOf8 = (value: number) => Math.max(32, Math.min(maxSide, Math.round((value * scale) / 8) * 8));
+  return { width: roundToMultipleOf8(width), height: roundToMultipleOf8(height) };
+}
+
+// Quand un modèle refuse une dimension, Leonardo renvoie la liste des valeurs acceptées
+// dans le message d'erreur (ex. "This model requires a width of 672, 720, 752, ..., 1568").
+// On parse cette liste et on choisit la paire largeur/hauteur la plus proche du ratio voulu.
+function parseAllowedSizesFromError(message: string): number[] | null {
+  const match = /requires (?:a )?(?:width|height) of ([\d,\s]+)/i.exec(message);
+  if (!match) return null;
+  const values = match[1]
+    .split(",")
+    .map((part) => parseInt(part.trim(), 10))
+    .filter((n) => Number.isFinite(n));
+  return values.length > 0 ? values : null;
+}
+
+function bestDimensionsFromAllowedSizes(sizes: number[], targetRatio: number): { width: number; height: number } {
+  let best = { width: sizes[0], height: sizes[0], diff: Infinity };
+  for (const width of sizes) {
+    for (const height of sizes) {
+      const diff = Math.abs(width / height - targetRatio);
+      if (diff < best.diff) best = { width, height, diff };
+    }
+  }
+  return { width: best.width, height: best.height };
+}
+
+function findModelList(node: unknown, depth = 0): LeonardoModel[] | null {
+  if (node == null || depth > 5) return null;
+  if (Array.isArray(node)) {
+    const looksLikeModels =
+      node.length > 0 &&
+      node.every(
+        (entry) =>
+          entry &&
+          typeof entry === "object" &&
+          typeof (entry as { id?: unknown }).id === "string" &&
+          typeof (entry as { name?: unknown }).name === "string"
+      );
+    if (looksLikeModels) {
+      return (node as Array<{ id: string; name: string; description?: string }>).map((m) => ({
+        id: m.id,
+        name: m.name,
+        description: m.description,
+      }));
+    }
+    return null;
+  }
+  if (typeof node === "object") {
+    for (const value of Object.values(node as Record<string, unknown>)) {
+      const found = findModelList(value, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
 export async function listLeonardoModels(apiKey: string): Promise<LeonardoModel[]> {
   const response = await fetch(`${LEONARDO_BASE}/platformModels`, {
     headers: authHeaders(apiKey),
+    cache: "no-store",
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
     throw new Error(data?.error ?? "Impossible de récupérer la liste des modèles Leonardo.");
   }
-  const raw =
-    data?.platformModels ??
-    data?.platform_models ??
-    data?.custom_models ??
-    data?.models ??
-    [];
-  return (raw as Array<{ id: string; name: string; description?: string }>).map((m) => ({
-    id: m.id,
-    name: m.name,
-    description: m.description,
-  }));
+  return findModelList(data) ?? [];
 }
 
-async function uploadInitImage(prompt: string, apiKey: string, dataUrl: string): Promise<string> {
+async function uploadInitImage(apiKey: string, dataUrl: string): Promise<string> {
   const match = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
   if (!match) throw new Error("Image de référence invalide.");
   const contentType = match[1];
@@ -82,6 +129,7 @@ async function pollGeneration(generationId: string, apiKey: string): Promise<str
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const response = await fetch(`${LEONARDO_BASE}/generations/${generationId}`, {
       headers: authHeaders(apiKey),
+      cache: "no-store",
     });
     const data = await response.json().catch(() => null);
     if (!response.ok) {
@@ -101,37 +149,10 @@ async function pollGeneration(generationId: string, apiKey: string): Promise<str
   throw new Error("La génération Leonardo a expiré (délai dépassé).");
 }
 
-export async function generateImageWithLeonardo(params: {
-  prompt: string;
-  apiKey: string;
-  modelId: string;
-  width: number;
-  height: number;
-  referenceImage?: string;
-  initStrength?: number;
-}): Promise<string> {
-  const { prompt, apiKey, modelId, width, height, referenceImage, initStrength = 0.4 } = params;
-
-  let initImageId: string | undefined;
-  if (referenceImage) {
-    initImageId = await uploadInitImage(prompt, apiKey, referenceImage);
-  }
-
-  const dimensions = clampDimensionsForLeonardo(width, height);
-
-  const body: Record<string, unknown> = {
-    prompt,
-    modelId,
-    width: dimensions.width,
-    height: dimensions.height,
-    num_images: 1,
-  };
-  if (initImageId) {
-    body.init_image_id = initImageId;
-    body.init_strength = initStrength;
-    body.isInitImage = true;
-  }
-
+async function startGeneration(
+  body: Record<string, unknown>,
+  apiKey: string
+): Promise<{ generationId: string; apiCreditCost?: number }> {
   const response = await fetch(`${LEONARDO_BASE}/generations`, {
     method: "POST",
     headers: authHeaders(apiKey),
@@ -143,13 +164,67 @@ export async function generateImageWithLeonardo(params: {
   }
   const generationId = data?.sdGenerationJob?.generationId;
   if (!generationId) throw new Error("Réponse inattendue de Leonardo (identifiant de génération manquant).");
+  return { generationId, apiCreditCost: data?.sdGenerationJob?.apiCreditCost };
+}
 
-  const imageUrl = await pollGeneration(generationId, apiKey);
+export interface LeonardoGenerationResult {
+  imageUrl: string;
+  apiCreditCost?: number;
+}
+
+export async function generateImageWithLeonardo(params: {
+  prompt: string;
+  apiKey: string;
+  modelId: string;
+  width: number;
+  height: number;
+  referenceImage?: string;
+  initStrength?: number;
+}): Promise<LeonardoGenerationResult> {
+  const { prompt, apiKey, modelId, width, height, referenceImage, initStrength = 0.4 } = params;
+
+  let initImageId: string | undefined;
+  if (referenceImage) {
+    initImageId = await uploadInitImage(apiKey, referenceImage);
+  }
+
+  const targetRatio = width / height;
+  let dimensions = clampDimensionsForLeonardo(width, height);
+
+  const buildBody = () => {
+    const body: Record<string, unknown> = {
+      prompt,
+      modelId,
+      width: dimensions.width,
+      height: dimensions.height,
+      num_images: 1,
+    };
+    if (initImageId) {
+      body.init_image_id = initImageId;
+      body.init_strength = initStrength;
+      body.isInitImage = true;
+    }
+    return body;
+  };
+
+  let job: { generationId: string; apiCreditCost?: number };
+  try {
+    job = await startGeneration(buildBody(), apiKey);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "";
+    const allowedSizes = parseAllowedSizesFromError(message);
+    if (!allowedSizes) throw error;
+    dimensions = bestDimensionsFromAllowedSizes(allowedSizes, targetRatio);
+    job = await startGeneration(buildBody(), apiKey);
+  }
+
+  const imageUrl = await pollGeneration(job.generationId, apiKey);
 
   const imageResponse = await fetch(imageUrl);
   if (!imageResponse.ok) throw new Error("Échec du téléchargement de l'image générée par Leonardo.");
   const arrayBuffer = await imageResponse.arrayBuffer();
   const base64 = Buffer.from(arrayBuffer).toString("base64");
   const contentType = imageResponse.headers.get("content-type") || "image/png";
-  return `data:${contentType};base64,${base64}`;
+
+  return { imageUrl: `data:${contentType};base64,${base64}`, apiCreditCost: job.apiCreditCost };
 }

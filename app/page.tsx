@@ -17,12 +17,12 @@ import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
 import { StepScript } from "./components/steps/StepScript";
-import { StepImages, isGeminiImageModel, isLeonardoImageModel } from "./components/steps/StepImages";
+import { StepImages } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
 import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
-import { estimateCost, formatEur, formatPollen } from "@/lib/cost-calculator";
+import { estimateCost, formatCredits, formatEur } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
 
 const STEPS: StepDefinition[] = [
@@ -65,7 +65,6 @@ export default function Home() {
     mistralModel: "mistral-small-latest",
     mistralApiKey: "",
     pollinationsApiKey: "",
-    geminiApiKey: "",
     leonardoApiKey: "",
   });
 
@@ -76,11 +75,12 @@ export default function Home() {
   const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
 
-  const [imageModel, setImageModel] = React.useState<ImageModel>("flux");
+  const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
   const [referenceImage, setReferenceImage] = React.useState<string | undefined>(undefined);
   const [promptStyleSuffix, setPromptStyleSuffix] = React.useState("");
+  const [leonardoCreditsUsed, setLeonardoCreditsUsed] = React.useState(0);
 
   const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
@@ -89,11 +89,7 @@ export default function Home() {
   const [project, setProject] = React.useState<VideoProject | null>(null);
   const [exporting, setExporting] = React.useState(false);
 
-  const cost = estimateCost({
-    mistralModel: config.mistralModel,
-    imageModel,
-    segmentCount: segments.length || 0,
-  });
+  const cost = estimateCost({ mistralModel: config.mistralModel });
 
   function updateConfig(patch: Partial<StepConfigState>) {
     setConfig((prev) => ({ ...prev, ...patch }));
@@ -256,12 +252,14 @@ export default function Home() {
 
   async function generateImageForSegment(
     segment: VideoSegment,
-    promptOverride: string,
-    seedOverride?: number
+    promptOverride: string
   ): Promise<string | null> {
     if (!config.profile) return null;
+    if (!imageModel) {
+      toast({ title: "Choisis un modèle Leonardo", description: "Sélectionne un modèle d'image avant de générer.", variant: "error" });
+      return null;
+    }
     const dimensions = getDimensionsForPlatform(config.platform);
-    const seed = seedOverride ?? segment.order * 1000;
     try {
       const response = await fetch("/api/generate-image", {
         method: "POST",
@@ -271,18 +269,16 @@ export default function Home() {
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
-          seed,
-          apiKey: config.pollinationsApiKey || undefined,
+          apiKey: config.leonardoApiKey || undefined,
           referenceImage: referenceImage || undefined,
-          provider: isGeminiImageModel(imageModel) ? "gemini" : isLeonardoImageModel(imageModel) ? "leonardo" : "pollinations",
-          geminiApiKey: config.geminiApiKey || undefined,
-          leonardoApiKey: config.leonardoApiKey || undefined,
-          platform: config.platform,
         }),
       });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data?.error ?? "Erreur lors de la génération de l'image.");
+      }
+      if (typeof data.apiCreditCost === "number") {
+        setLeonardoCreditsUsed((prev) => prev + data.apiCreditCost);
       }
       return data.imageUrl as string;
     } catch (error) {
@@ -330,9 +326,7 @@ export default function Home() {
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
     const { prompt, isVariation } = getEffectivePrompt(index);
-    // Seed aléatoire pour éviter de regénérer une image identique et gaspiller des crédits
-    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, seed);
+    const imageUrl = await generateImageForSegment(segment, prompt);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
@@ -353,8 +347,7 @@ export default function Home() {
     setImageLoadingIds((prev) => new Set(prev).add(id));
     const { prompt: basePrompt } = getEffectivePrompt(index);
     const prompt = `${basePrompt}, slight variation, same composition, different angle`;
-    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, seed);
+    const imageUrl = await generateImageForSegment(segment, prompt);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
@@ -464,10 +457,10 @@ export default function Home() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">Coût estimé total</span>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Coûts</span>
           <div className="flex gap-2">
-            <CostBadge label={formatPollen(cost.totalPollen)} />
-            <CostBadge label={formatEur(cost.totalEur)} />
+            <CostBadge label={`Script ~${formatEur(cost.scriptEur)}`} />
+            <CostBadge label={formatCredits(leonardoCreditsUsed)} />
           </div>
         </div>
       </header>
