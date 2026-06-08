@@ -133,6 +133,11 @@ export async function POST(request: Request) {
     const montageGuide = await buildMontageGuide(project, apiKey);
     zip.file("guide_montage_capcut.txt", montageGuide);
 
+    if (project.publishMetadata && (project.publishMetadata.caption || project.publishMetadata.hashtags.length > 0)) {
+      const hashtags = project.publishMetadata.hashtags.map((h) => `#${h}`).join(" ");
+      zip.file("legende_publication.txt", `${project.publishMetadata.caption}\n\n${hashtags}`.trim());
+    }
+
     const metadata = {
       id: project.id,
       subject: project.subject,
@@ -142,6 +147,7 @@ export async function POST(request: Request) {
       mistralModel: project.mistralModel,
       imageModel: project.imageModel,
       viralityScore: project.viralityScore ?? null,
+      publishMetadata: project.publishMetadata ?? null,
       segmentCount: project.segments.length,
       totalDuration: project.segments.reduce((sum, s) => sum + s.duration, 0),
       createdAt: project.createdAt,

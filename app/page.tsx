@@ -13,6 +13,8 @@ import type {
   ViralityScore,
   VisualStyle,
   VoiceId,
+  PublishMetadata,
+  VideoRenderOptions,
 } from "@/types";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
@@ -20,7 +22,9 @@ import { StepConfig, type StepConfigState } from "./components/steps/StepConfig"
 import { StepScript } from "./components/steps/StepScript";
 import { StepImages } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
+import { StepVideo } from "./components/steps/StepVideo";
 import { StepExport } from "./components/steps/StepExport";
+import { renderVideo } from "@/lib/video-render";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
 import { estimateCost, formatCredits, formatEur } from "@/lib/cost-calculator";
@@ -31,7 +35,8 @@ const STEPS: StepDefinition[] = [
   { index: 1, title: "Script" },
   { index: 2, title: "Images" },
   { index: 3, title: "Voix off" },
-  { index: 4, title: "Export" },
+  { index: 4, title: "Vidéo" },
+  { index: 5, title: "Export" },
 ];
 
 interface RawSegment {
@@ -87,6 +92,20 @@ export default function Home() {
   const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
   const [generatingVoice, setGeneratingVoice] = React.useState(false);
+
+  const [renderOptions, setRenderOptions] = React.useState<VideoRenderOptions>({
+    kenBurns: true,
+    transitions: true,
+    subtitleStyle: "karaoke",
+    musicUrl: undefined,
+    musicVolume: 0.15,
+  });
+  const [musicName, setMusicName] = React.useState<string | undefined>(undefined);
+  const [videoResult, setVideoResult] = React.useState<{ url: string; extension: "mp4" | "webm" } | undefined>(undefined);
+  const [rendering, setRendering] = React.useState(false);
+  const [renderProgress, setRenderProgress] = React.useState<{ ratio: number; label: string }>({ ratio: 0, label: "" });
+  const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
+  const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
 
   const [project, setProject] = React.useState<VideoProject | null>(null);
   const [exporting, setExporting] = React.useState(false);
@@ -397,6 +416,91 @@ export default function Home() {
     setUnlockedStep((u) => Math.max(u, 3));
   }
 
+  function handleProceedToVideo() {
+    setCurrentStep(4);
+    setUnlockedStep((u) => Math.max(u, 4));
+  }
+
+  function handleRenderOptionsChange(patch: Partial<VideoRenderOptions>) {
+    setRenderOptions((prev) => ({ ...prev, ...patch }));
+  }
+
+  function handleMusicChange(file: File | null) {
+    if (renderOptions.musicUrl) URL.revokeObjectURL(renderOptions.musicUrl);
+    if (!file) {
+      setMusicName(undefined);
+      handleRenderOptionsChange({ musicUrl: undefined });
+      return;
+    }
+    setMusicName(file.name);
+    handleRenderOptionsChange({ musicUrl: URL.createObjectURL(file) });
+  }
+
+  async function handleRenderVideo() {
+    if (!segments.every((s) => !!s.imageUrl)) {
+      toast({ title: "Images manquantes", description: "Génère toutes les images avant de monter la vidéo.", variant: "error" });
+      return;
+    }
+    setRendering(true);
+    setRenderProgress({ ratio: 0, label: "Préparation..." });
+    try {
+      if (videoResult) URL.revokeObjectURL(videoResult.url);
+      const result = await renderVideo({
+        segments,
+        voiceoverUrl,
+        platform: config.platform,
+        options: renderOptions,
+        onProgress: (ratio, label) => setRenderProgress({ ratio, label }),
+      });
+      const url = URL.createObjectURL(result.blob);
+      setVideoResult({ url, extension: result.extension });
+      toast({
+        title: "Vidéo générée !",
+        description: result.extension === "mp4" ? "Ta vidéo MP4 est prête." : "Vidéo WebM prête (conversion MP4 indisponible).",
+        variant: "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec du montage vidéo", description: message, variant: "error" });
+    } finally {
+      setRendering(false);
+    }
+  }
+
+  async function handleGenerateMetadata() {
+    setGeneratingMetadata(true);
+    try {
+      const narration = segments
+        .slice()
+        .sort((a, b) => a.order - b.order)
+        .map((s) => s.narration)
+        .join(" ");
+      const response = await fetch("/api/generate-metadata", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: config.subject,
+          narration,
+          platform: config.platform,
+          language: config.language,
+          model: config.mistralModel,
+          apiKey: config.mistralApiKey || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        throw new Error(data?.error ?? "Erreur lors de la génération des métadonnées.");
+      }
+      setPublishMetadata({ caption: data.caption ?? "", hashtags: data.hashtags ?? [] });
+      toast({ title: "Légende & hashtags générés !", variant: "success" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec de la génération", description: message, variant: "error" });
+    } finally {
+      setGeneratingMetadata(false);
+    }
+  }
+
   function handleProceedToExport() {
     if (!config.profile) return;
     const newProject: VideoProject = {
@@ -410,11 +514,12 @@ export default function Home() {
       mistralModel: config.mistralModel,
       imageModel,
       viralityScore: viralityScore ?? undefined,
+      publishMetadata,
       createdAt: new Date().toISOString(),
     };
     setProject(newProject);
-    setCurrentStep(4);
-    setUnlockedStep((u) => Math.max(u, 4));
+    setCurrentStep(5);
+    setUnlockedStep((u) => Math.max(u, 5));
   }
 
   async function handleExport() {
@@ -457,7 +562,7 @@ export default function Home() {
           </span>
           <div>
             <h1 className="text-xl font-bold tracking-tight">StudioAI</h1>
-            <p className="text-sm text-muted-foreground">Crée des vidéos faceless virales en 5 étapes</p>
+            <p className="text-sm text-muted-foreground">Crée des vidéos faceless virales en 6 étapes</p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -515,11 +620,31 @@ export default function Home() {
           onGenerateVoice={handleGenerateVoice}
           voiceoverUrl={voiceoverUrl}
           generatingVoice={generatingVoice}
+          onProceed={handleProceedToVideo}
+        />
+      )}
+
+      {currentStep === 4 && (
+        <StepVideo
+          segments={segments}
+          voiceoverUrl={voiceoverUrl}
+          renderOptions={renderOptions}
+          onRenderOptionsChange={handleRenderOptionsChange}
+          onMusicChange={handleMusicChange}
+          musicName={musicName}
+          videoUrl={videoResult?.url}
+          videoExtension={videoResult?.extension}
+          rendering={rendering}
+          renderProgress={renderProgress}
+          onRender={handleRenderVideo}
+          publishMetadata={publishMetadata}
+          generatingMetadata={generatingMetadata}
+          onGenerateMetadata={handleGenerateMetadata}
           onProceed={handleProceedToExport}
         />
       )}
 
-      {currentStep === 4 && <StepExport project={project} onExport={handleExport} exporting={exporting} />}
+      {currentStep === 5 && <StepExport project={project} onExport={handleExport} exporting={exporting} />}
     </main>
   );
 }

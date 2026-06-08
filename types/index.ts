@@ -40,6 +40,21 @@ export interface ViralityScore {
   suggestions: string[];
 }
 
+export interface PublishMetadata {
+  caption: string;
+  hashtags: string[];
+}
+
+export type SubtitleStyle = "karaoke" | "block" | "none";
+
+export interface VideoRenderOptions {
+  kenBurns: boolean;
+  transitions: boolean;
+  subtitleStyle: SubtitleStyle;
+  musicUrl?: string;
+  musicVolume: number;
+}
+
 export interface VideoProject {
   id: string;
   subject: string;
@@ -51,6 +66,7 @@ export interface VideoProject {
   mistralModel: string;
   imageModel: string;
   viralityScore?: ViralityScore;
+  publishMetadata?: PublishMetadata;
   createdAt: string;
 }
 

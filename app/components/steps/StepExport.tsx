@@ -18,7 +18,7 @@ export function StepExport({ project, onExport, exporting }: StepExportProps) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Étape 4 — Export</CardTitle>
+          <CardTitle>Étape 6 — Export</CardTitle>
           <CardDescription>Termine d'abord les étapes précédentes pour générer ton export.</CardDescription>
         </CardHeader>
       </Card>
@@ -31,7 +31,7 @@ export function StepExport({ project, onExport, exporting }: StepExportProps) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Étape 4 — Export</CardTitle>
+        <CardTitle>Étape 6 — Export</CardTitle>
         <CardDescription>Télécharge un ZIP complet prêt pour le montage.</CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
@@ -60,6 +60,7 @@ export function StepExport({ project, onExport, exporting }: StepExportProps) {
             <li>image_01.png ... image_{String(project.segments.length).padStart(2, "0")}.png</li>
             <li>voiceover.mp3 — voix off complète</li>
             <li>guide_montage_capcut.txt — guide de montage généré par l'IA</li>
+            {project.publishMetadata && <li>legende_publication.txt — légende + hashtags</li>}
             <li>metadata.json — paramètres complets du projet</li>
           </ul>
         </div>
