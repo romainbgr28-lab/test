@@ -45,7 +45,7 @@ export interface VideoProject {
 
 export type MistralModel = "mistral-small-latest" | "mistral-large-latest";
 
-export type ImageModel = "flux" | "turbo" | "kontext";
+export type ImageModel = string;
 
 export type VoiceId = "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
 

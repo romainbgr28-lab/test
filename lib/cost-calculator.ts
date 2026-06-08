@@ -5,7 +5,7 @@ export const MISTRAL_COSTS: Record<MistralModel, { label: string; eurPerScript: 
   "mistral-large-latest": { label: "Puissant - ~0.02€/script", eurPerScript: 0.02 },
 };
 
-export const IMAGE_COSTS: Record<ImageModel, { label: string; pollenPerImage: number }> = {
+export const IMAGE_COSTS: Partial<Record<ImageModel, { label: string; pollenPerImage: number }>> = {
   flux: { label: "Gratuit", pollenPerImage: 0 },
   turbo: { label: "0.003 Pollen/image", pollenPerImage: 0.003 },
   kontext: { label: "0.04 Pollen/image", pollenPerImage: 0.04 },

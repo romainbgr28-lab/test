@@ -12,11 +12,15 @@ import { Skeleton } from "../ui/Skeleton";
 import { IMAGE_COSTS } from "@/lib/cost-calculator";
 import { VOICE_DESCRIPTIONS } from "@/lib/pollinations";
 
-const IMAGE_MODEL_OPTIONS = (Object.keys(IMAGE_COSTS) as ImageModel[]).map((key) => ({
-  value: key,
-  label: key,
-  description: IMAGE_COSTS[key].label,
-}));
+const FALLBACK_IMAGE_MODELS = Object.keys(IMAGE_COSTS) as ImageModel[];
+
+function buildImageModelOptions(models: ImageModel[]) {
+  return models.map((key) => ({
+    value: key,
+    label: key,
+    description: IMAGE_COSTS[key]?.label ?? "Modèle Pollinations",
+  }));
+}
 
 const VOICE_OPTIONS = (Object.keys(VOICE_DESCRIPTIONS) as VoiceId[]).map((key) => ({
   value: key,
@@ -54,6 +58,27 @@ export function StepAssets({
   generatingVoice,
   onProceed,
 }: StepAssetsProps) {
+  const [imageModelOptions, setImageModelOptions] = React.useState(() =>
+    buildImageModelOptions(FALLBACK_IMAGE_MODELS)
+  );
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/image-models")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Échec du chargement des modèles"))))
+      .then((data: { models?: ImageModel[] }) => {
+        if (!cancelled && Array.isArray(data.models) && data.models.length > 0) {
+          setImageModelOptions(buildImageModelOptions(data.models));
+        }
+      })
+      .catch(() => {
+        // garde la liste de secours en cas d'échec
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const generatedCount = segments.filter((s) => !!s.imageUrl).length;
   const canProceed = generatedCount === segments.length && segments.length > 0 && !!voiceoverUrl;
 
@@ -77,7 +102,7 @@ export function StepAssets({
                 label="Modèle d'image (Pollinations)"
                 value={imageModel}
                 onChange={(v) => onImageModelChange(v as ImageModel)}
-                options={IMAGE_MODEL_OPTIONS}
+                options={imageModelOptions}
               />
               <div className="flex items-center justify-between">
                 <Button onClick={onGenerateAllImages} disabled={generatingImages}>

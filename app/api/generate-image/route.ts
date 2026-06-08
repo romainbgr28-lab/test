@@ -29,6 +29,15 @@ export async function POST(request: Request) {
     const response = await fetch(url, { headers });
     if (!response.ok) {
       const text = await response.text();
+      if (response.status === 402) {
+        return NextResponse.json(
+          {
+            error: `Le modèle "${model}" nécessite un compte Pollinations avec des crédits (Pollen) ou un abonnement payant. Renseigne une clé API Pollinations valide et créditée dans la configuration, ou choisis un modèle gratuit (ex. "flux").`,
+            details: text,
+          },
+          { status: 402 }
+        );
+      }
       return NextResponse.json(
         { error: `Le service d'images a renvoyé une erreur (${response.status}).`, details: text },
         { status: 502 }
