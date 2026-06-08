@@ -17,7 +17,8 @@ import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
 import { StepScript } from "./components/steps/StepScript";
-import { StepAssets } from "./components/steps/StepAssets";
+import { StepImages } from "./components/steps/StepImages";
+import { StepVoice } from "./components/steps/StepVoice";
 import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
@@ -27,8 +28,9 @@ import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/poll
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
   { index: 1, title: "Script" },
-  { index: 2, title: "Assets" },
-  { index: 3, title: "Export" },
+  { index: 2, title: "Images" },
+  { index: 3, title: "Voix off" },
+  { index: 4, title: "Export" },
 ];
 
 interface RawSegment {
@@ -350,6 +352,11 @@ export default function Home() {
     }
   }
 
+  function handleProceedToVoice() {
+    setCurrentStep(3);
+    setUnlockedStep((u) => Math.max(u, 3));
+  }
+
   function handleProceedToExport() {
     if (!config.profile) return;
     const newProject: VideoProject = {
@@ -366,8 +373,8 @@ export default function Home() {
       createdAt: new Date().toISOString(),
     };
     setProject(newProject);
-    setCurrentStep(3);
-    setUnlockedStep((u) => Math.max(u, 3));
+    setCurrentStep(4);
+    setUnlockedStep((u) => Math.max(u, 4));
   }
 
   async function handleExport() {
@@ -410,7 +417,7 @@ export default function Home() {
           </span>
           <div>
             <h1 className="text-xl font-bold tracking-tight">StudioAI</h1>
-            <p className="text-sm text-muted-foreground">Crée des vidéos faceless virales en 4 étapes</p>
+            <p className="text-sm text-muted-foreground">Crée des vidéos faceless virales en 5 étapes</p>
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
@@ -442,7 +449,7 @@ export default function Home() {
       )}
 
       {currentStep === 2 && (
-        <StepAssets
+        <StepImages
           segments={segments}
           imageModel={imageModel}
           onImageModelChange={setImageModel}
@@ -456,6 +463,12 @@ export default function Home() {
           onReferenceImageChange={handleReferenceImageUpload}
           promptStyleSuffix={promptStyleSuffix}
           onPromptStyleSuffixChange={setPromptStyleSuffix}
+          onProceed={handleProceedToVoice}
+        />
+      )}
+
+      {currentStep === 3 && (
+        <StepVoice
           voiceId={voiceId}
           onVoiceChange={setVoiceId}
           onGenerateVoice={handleGenerateVoice}
@@ -465,7 +478,7 @@ export default function Home() {
         />
       )}
 
-      {currentStep === 3 && <StepExport project={project} onExport={handleExport} exporting={exporting} />}
+      {currentStep === 4 && <StepExport project={project} onExport={handleExport} exporting={exporting} />}
     </main>
   );
 }

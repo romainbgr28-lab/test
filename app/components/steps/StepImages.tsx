@@ -1,0 +1,257 @@
+"use client";
+
+import * as React from "react";
+import { ImagePlus, ArrowRight, Loader2, Upload, X, Sparkles, RefreshCw } from "lucide-react";
+import type { ImageModel, VideoSegment } from "@/types";
+import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
+import { ModelSelector } from "../ui/ModelSelector";
+import { Button } from "../ui/Button";
+import { Input } from "../ui/Input";
+import { Textarea } from "../ui/Textarea";
+import { Skeleton } from "../ui/Skeleton";
+import { IMAGE_COSTS } from "@/lib/cost-calculator";
+import { IMAGE_EDIT_MODELS, modelSupportsReferenceImage } from "@/lib/pollinations";
+
+const FALLBACK_IMAGE_MODELS = Object.keys(IMAGE_COSTS) as ImageModel[];
+
+function buildImageModelOptions(models: ImageModel[]) {
+  return models.map((key) => ({
+    value: key,
+    label: key,
+    description: IMAGE_COSTS[key]?.label ?? "Modèle Pollinations",
+  }));
+}
+
+interface StepImagesProps {
+  segments: VideoSegment[];
+  imageModel: ImageModel;
+  onImageModelChange: (model: ImageModel) => void;
+  onGenerateAllImages: () => void;
+  onRegenerateImage: (id: string) => void;
+  onGenerateImageVariation: (id: string) => void;
+  generatingImages: boolean;
+  imageLoadingIds: Set<string>;
+  onSegmentPromptChange: (id: string, imagePrompt: string) => void;
+  referenceImage?: string;
+  onReferenceImageChange: (file: File | null) => void;
+  promptStyleSuffix: string;
+  onPromptStyleSuffixChange: (value: string) => void;
+  onProceed: () => void;
+}
+
+export function StepImages({
+  segments,
+  imageModel,
+  onImageModelChange,
+  onGenerateAllImages,
+  onRegenerateImage,
+  onGenerateImageVariation,
+  generatingImages,
+  imageLoadingIds,
+  onSegmentPromptChange,
+  referenceImage,
+  onReferenceImageChange,
+  promptStyleSuffix,
+  onPromptStyleSuffixChange,
+  onProceed,
+}: StepImagesProps) {
+  const [imageModelOptions, setImageModelOptions] = React.useState(() =>
+    buildImageModelOptions(FALLBACK_IMAGE_MODELS)
+  );
+  const fileInputRef = React.useRef<HTMLInputElement>(null);
+  const supportsReference = modelSupportsReferenceImage(imageModel);
+
+  React.useEffect(() => {
+    let cancelled = false;
+    fetch("/api/image-models")
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Échec du chargement des modèles"))))
+      .then((data: { models?: ImageModel[] }) => {
+        if (!cancelled && Array.isArray(data.models) && data.models.length > 0) {
+          setImageModelOptions(buildImageModelOptions(data.models));
+        }
+      })
+      .catch(() => {
+        // garde la liste de secours en cas d'échec
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const generatedCount = segments.filter((s) => !!s.imageUrl).length;
+  const canProceed = generatedCount === segments.length && segments.length > 0;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>Étape 3 — Images</CardTitle>
+        <CardDescription>
+          Configure le style visuel puis génère, ajuste et régénère les images de chaque segment.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="flex flex-col gap-6">
+        <Card className="bg-secondary/30">
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2 text-base">
+              <Sparkles className="h-4 w-4" />
+              Style global
+            </CardTitle>
+            <CardDescription>
+              Ces réglages s&apos;appliquent à toutes les images pour garder une cohérence visuelle et limiter les
+              générations ratées (et donc les crédits gaspillés).
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <ModelSelector
+              label="Modèle d'image (Pollinations)"
+              value={imageModel}
+              onChange={(v) => onImageModelChange(v as ImageModel)}
+              options={imageModelOptions}
+            />
+
+            <div className="flex flex-col gap-1.5">
+              <label className="text-sm font-medium text-foreground">Style ajouté à tous les prompts (optionnel)</label>
+              <Input
+                value={promptStyleSuffix}
+                onChange={(e) => onPromptStyleSuffixChange(e.target.value)}
+                placeholder="ex. cinematic lighting, ultra detailed, 8k"
+              />
+              <p className="text-xs text-muted-foreground">Ajouté à la fin de chaque prompt avant la génération.</p>
+            </div>
+
+            <div className="flex flex-col gap-1.5 lg:col-span-2">
+              <label className="text-sm font-medium text-foreground">Image de référence (optionnel)</label>
+              <p className="text-xs text-muted-foreground">
+                Sert de base visuelle pour guider le style et la composition. Compatible avec les modèles d&apos;édition :{" "}
+                {IMAGE_EDIT_MODELS.join(", ")}.
+              </p>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => onReferenceImageChange(e.target.files?.[0] ?? null)}
+              />
+              {referenceImage ? (
+                <div className="flex items-center gap-3">
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={referenceImage}
+                    alt="Image de référence"
+                    className="h-16 w-16 rounded-md border border-border object-cover"
+                  />
+                  <Button variant="outline" size="sm" onClick={() => onReferenceImageChange(null)}>
+                    <X className="h-4 w-4" />
+                    Retirer
+                  </Button>
+                </div>
+              ) : (
+                <Button variant="outline" size="sm" className="w-fit" onClick={() => fileInputRef.current?.click()}>
+                  <Upload className="h-4 w-4" />
+                  Importer une image
+                </Button>
+              )}
+              {referenceImage && !supportsReference && (
+                <p className="text-xs text-amber-500">
+                  Le modèle « {imageModel} » ignore l&apos;image de référence : choisis un modèle d&apos;édition
+                  ci-dessus pour l&apos;utiliser ({IMAGE_EDIT_MODELS.join(", ")}).
+                </p>
+              )}
+            </div>
+          </CardContent>
+        </Card>
+
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3">
+          <div className="flex flex-col">
+            <span className="text-sm font-medium text-foreground">Génération des visuels</span>
+            <span className="text-xs text-muted-foreground">
+              {generatedCount}/{segments.length} images générées
+            </span>
+          </div>
+          <Button onClick={onGenerateAllImages} disabled={generatingImages}>
+            {generatingImages ? <Loader2 className="h-4 w-4 animate-spin" /> : <ImagePlus className="h-4 w-4" />}
+            Générer toutes les images
+          </Button>
+        </div>
+
+        <div className="flex flex-col gap-4">
+          {segments.map((segment) => {
+            const loading = imageLoadingIds.has(segment.id);
+            return (
+              <Card key={segment.id} className="overflow-hidden">
+                <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">
+                  <div className="flex w-full shrink-0 flex-col gap-2 sm:w-56">
+                    <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg border border-border bg-secondary">
+                      {loading ? (
+                        <Skeleton className="h-full w-full" />
+                      ) : segment.imageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element
+                        <img
+                          src={segment.imageUrl}
+                          alt={`Visuel segment ${segment.order}`}
+                          className="h-full w-full object-cover"
+                        />
+                      ) : (
+                        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+                          Segment {segment.order}
+                        </div>
+                      )}
+                    </div>
+                    <div className="flex items-center justify-between gap-1">
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        Segment {segment.order} · {segment.duration}s
+                      </span>
+                      {segment.isSceneVariation && (
+                        <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                          Variation
+                        </span>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-1 flex-col gap-3">
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                        Prompt image (modifiable)
+                      </label>
+                      <Textarea
+                        value={segment.imagePrompt ?? ""}
+                        onChange={(e) => onSegmentPromptChange(segment.id, e.target.value)}
+                        placeholder={segment.visualDescription}
+                        className="min-h-[140px] text-sm leading-relaxed"
+                      />
+                      <p className="text-xs text-muted-foreground">
+                        Laisse vide pour utiliser la description visuelle générée à partir du script.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      <Button variant="outline" size="sm" onClick={() => onRegenerateImage(segment.id)} disabled={loading}>
+                        <RefreshCw className={`h-3.5 w-3.5 ${loading ? "animate-spin" : ""}`} />
+                        Régénérer
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => onGenerateImageVariation(segment.id)}
+                        disabled={loading}
+                      >
+                        <Sparkles className="h-3.5 w-3.5" />
+                        Générer une variation
+                      </Button>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            );
+          })}
+        </div>
+      </CardContent>
+      <CardFooter>
+        <Button onClick={onProceed} disabled={!canProceed} size="lg">
+          <ArrowRight className="h-4 w-4" />
+          Passer à la voix off
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
