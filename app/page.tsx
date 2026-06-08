@@ -108,6 +108,8 @@ export default function Home() {
     setSegments([]);
     setScriptValidated(false);
     setScriptProgress([]);
+    setUnlockedStep((u) => Math.max(u, 1));
+    setCurrentStep(1);
     try {
       const response = await fetch("/api/generate-script", {
         method: "POST",
