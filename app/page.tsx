@@ -61,6 +61,8 @@ export default function Home() {
     duration: 60,
     language: "fr",
     mistralModel: "mistral-small-latest",
+    mistralApiKey: "",
+    pollinationsApiKey: "",
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
@@ -111,6 +113,7 @@ export default function Home() {
           nicheInstructions: config.profile.instructions,
           duration: config.duration,
           model: config.mistralModel,
+          apiKey: config.mistralApiKey || undefined,
         }),
       });
       const data = await response.json();
@@ -150,6 +153,7 @@ export default function Home() {
           nicheInstructions: config.profile.instructions,
           duration: config.duration,
           model: config.mistralModel,
+          apiKey: config.mistralApiKey || undefined,
           regenerateSegmentOrder: segment.order,
           existingSegment: {
             order: segment.order,
@@ -197,6 +201,7 @@ export default function Home() {
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
+          apiKey: config.pollinationsApiKey || undefined,
         }),
       });
       const data = await response.json();

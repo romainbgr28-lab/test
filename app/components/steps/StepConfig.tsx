@@ -4,6 +4,7 @@ import * as React from "react";
 import { Sparkles, Loader2 } from "lucide-react";
 import type { Language, MistralModel, NicheProfile, Platform } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
+import { Input } from "../ui/Input";
 import { Textarea } from "../ui/Textarea";
 import { Select } from "../ui/Select";
 import { ProfileManager } from "../ui/ProfileManager";
@@ -45,6 +46,8 @@ export interface StepConfigState {
   duration: number;
   language: Language;
   mistralModel: MistralModel;
+  mistralApiKey: string;
+  pollinationsApiKey: string;
 }
 
 interface StepConfigProps {
@@ -113,6 +116,32 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
           onChange={(v) => onChange({ mistralModel: v as MistralModel })}
           options={MISTRAL_OPTIONS}
         />
+
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Clé API Mistral</label>
+            <Input
+              type="password"
+              value={state.mistralApiKey}
+              onChange={(e) => onChange({ mistralApiKey: e.target.value })}
+              placeholder="Laisse vide pour utiliser la clé du serveur"
+              autoComplete="off"
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Clé API Pollinations</label>
+            <Input
+              type="password"
+              value={state.pollinationsApiKey}
+              onChange={(e) => onChange({ pollinationsApiKey: e.target.value })}
+              placeholder="Laisse vide pour utiliser la clé du serveur"
+              autoComplete="off"
+            />
+          </div>
+        </div>
+        <p className="-mt-2 text-xs text-muted-foreground">
+          Ces clés ne sont jamais enregistrées : elles sont utilisées uniquement pour tes appels et restent dans ton navigateur.
+        </p>
       </CardContent>
       <CardFooter>
         <Button onClick={onGenerate} disabled={!canGenerate} size="lg" className="w-full sm:w-auto">

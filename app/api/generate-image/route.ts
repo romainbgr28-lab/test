@@ -6,11 +6,12 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, model, width, height } = body as {
+    const { prompt, model, width, height, apiKey } = body as {
       prompt: string;
       model: string;
       width: number;
       height: number;
+      apiKey?: string;
     };
 
     if (!prompt || !model || !width || !height) {
@@ -19,9 +20,10 @@ export async function POST(request: Request) {
 
     const url = buildImageUrl({ prompt, model, width, height });
 
+    const key = apiKey || process.env.POLLINATIONS_API_KEY;
     const headers: Record<string, string> = {};
-    if (process.env.POLLINATIONS_API_KEY) {
-      headers.Authorization = `Bearer ${process.env.POLLINATIONS_API_KEY}`;
+    if (key) {
+      headers.Authorization = `Bearer ${key}`;
     }
 
     const response = await fetch(url, { headers });
