@@ -6,19 +6,20 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, model, width, height, apiKey } = body as {
+    const { prompt, model, width, height, apiKey, seed } = body as {
       prompt: string;
       model: string;
       width: number;
       height: number;
       apiKey?: string;
+      seed?: number;
     };
 
     if (!prompt || !model || !width || !height) {
       return NextResponse.json({ error: "Paramètres manquants pour générer l'image." }, { status: 400 });
     }
 
-    const url = buildImageUrl({ prompt, model, width, height });
+    const url = buildImageUrl({ prompt, model, width, height, seed });
 
     const key = apiKey || process.env.POLLINATIONS_API_KEY;
     if (!key) {

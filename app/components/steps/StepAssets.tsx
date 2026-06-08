@@ -33,6 +33,7 @@ interface StepAssetsProps {
   onImageModelChange: (model: ImageModel) => void;
   onGenerateAllImages: () => void;
   onRegenerateImage: (id: string) => void;
+  onGenerateImageVariation: (id: string) => void;
   generatingImages: boolean;
   imageLoadingIds: Set<string>;
   voiceId: VoiceId;
@@ -49,6 +50,7 @@ export function StepAssets({
   onImageModelChange,
   onGenerateAllImages,
   onRegenerateImage,
+  onGenerateImageVariation,
   generatingImages,
   imageLoadingIds,
   voiceId,
@@ -134,6 +136,14 @@ export function StepAssets({
                           </div>
                         )}
                       </div>
+                      <div className="flex items-center justify-between gap-1">
+                        <span className="text-xs text-muted-foreground">{segment.duration}s</span>
+                        {segment.isSceneVariation && (
+                          <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+                            Variation de la scène précédente
+                          </span>
+                        )}
+                      </div>
                       <Button
                         variant="outline"
                         size="sm"
@@ -142,6 +152,15 @@ export function StepAssets({
                         disabled={loading}
                       >
                         Regénérer
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="w-full"
+                        onClick={() => onGenerateImageVariation(segment.id)}
+                        disabled={loading}
+                      >
+                        Générer une variation
                       </Button>
                     </div>
                   );

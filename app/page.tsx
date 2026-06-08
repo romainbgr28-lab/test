@@ -189,18 +189,33 @@ export default function Home() {
     toast({ title: "Script validé", description: "Passe à la génération des assets.", variant: "success" });
   }
 
-  async function generateImageForSegment(segment: VideoSegment): Promise<string | null> {
+  function buildSceneContinuityPrompt(segs: VideoSegment[], index: number): { prompt: string; isVariation: boolean } {
+    const segment = segs[index];
+    const previous = segs[index - 1];
+    const isVariation = !!previous && previous.duration + segment.duration < 10;
+    if (isVariation) {
+      return {
+        prompt: `${segment.visualDescription}, same scene as previous, slight camera movement, subtle shift in framing and lighting`,
+        isVariation: true,
+      };
+    }
+    return { prompt: segment.visualDescription, isVariation: false };
+  }
+
+  async function generateImageForSegment(segment: VideoSegment, promptOverride?: string): Promise<string | null> {
     if (!config.profile) return null;
     const dimensions = getDimensionsForPlatform(config.platform);
+    const seed = segment.order * 1000;
     try {
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: segment.visualDescription,
+          prompt: promptOverride ?? segment.visualDescription,
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
+          seed,
           apiKey: config.pollinationsApiKey || undefined,
         }),
       });
@@ -221,16 +236,17 @@ export default function Home() {
     setImageLoadingIds(new Set(segments.map((s) => s.id)));
     try {
       const results = await Promise.all(
-        segments.map(async (segment) => {
-          const imageUrl = await generateImageForSegment(segment);
-          return { id: segment.id, imageUrl };
+        segments.map(async (segment, index) => {
+          const { prompt, isVariation } = buildSceneContinuityPrompt(segments, index);
+          const imageUrl = await generateImageForSegment(segment, prompt);
+          return { id: segment.id, imageUrl, isVariation };
         })
       );
       setSegments((prev) =>
         prev.map((s) => {
           const result = results.find((r) => r.id === s.id);
           if (result?.imageUrl) {
-            return { ...s, imageUrl: result.imageUrl, imageBlob: result.imageUrl };
+            return { ...s, imageUrl: result.imageUrl, imageBlob: result.imageUrl, isSceneVariation: result.isVariation };
           }
           return s;
         })
@@ -248,13 +264,36 @@ export default function Home() {
   }
 
   async function handleRegenerateImage(id: string) {
+    const index = segments.findIndex((s) => s.id === id);
+    if (index === -1) return;
+    const segment = segments[index];
+    setImageLoadingIds((prev) => new Set(prev).add(id));
+    const { prompt, isVariation } = buildSceneContinuityPrompt(segments, index);
+    const imageUrl = await generateImageForSegment(segment, prompt);
+    if (imageUrl) {
+      setSegments((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
+      );
+      toast({ title: `Image du segment ${segment.order} régénérée`, variant: "success" });
+    }
+    setImageLoadingIds((prev) => {
+      const next = new Set(prev);
+      next.delete(id);
+      return next;
+    });
+  }
+
+  async function handleGenerateImageVariation(id: string) {
     const segment = segments.find((s) => s.id === id);
     if (!segment) return;
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const imageUrl = await generateImageForSegment(segment);
+    const prompt = `${segment.visualDescription}, slight variation, same composition, different angle`;
+    const imageUrl = await generateImageForSegment(segment, prompt);
     if (imageUrl) {
-      setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl } : s)));
-      toast({ title: `Image du segment ${segment.order} régénérée`, variant: "success" });
+      setSegments((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
+      );
+      toast({ title: `Variation générée pour le segment ${segment.order}`, variant: "success" });
     }
     setImageLoadingIds((prev) => {
       const next = new Set(prev);
@@ -388,6 +427,7 @@ export default function Home() {
           onImageModelChange={setImageModel}
           onGenerateAllImages={handleGenerateAllImages}
           onRegenerateImage={handleRegenerateImage}
+          onGenerateImageVariation={handleGenerateImageVariation}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
           voiceId={voiceId}

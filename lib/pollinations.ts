@@ -29,6 +29,7 @@ export function buildImageUrl(params: {
   model: string;
   width: number;
   height: number;
+  seed?: number;
 }): string {
   const encoded = encodeURIComponent(params.prompt);
   const query = new URLSearchParams({
@@ -37,6 +38,9 @@ export function buildImageUrl(params: {
     height: String(params.height),
     nologo: "true",
   });
+  if (params.seed !== undefined) {
+    query.set("seed", String(params.seed));
+  }
   return `${IMAGE_ENDPOINT}/${encoded}?${query.toString()}`;
 }
 

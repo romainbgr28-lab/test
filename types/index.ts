@@ -19,6 +19,7 @@ export interface VideoSegment {
   duration: number;
   imageUrl?: string;
   imageBlob?: string;
+  isSceneVariation?: boolean;
 }
 
 export interface ViralityScore {
