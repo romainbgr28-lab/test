@@ -274,7 +274,7 @@ export default function Home() {
       const response = await fetch("/api/generate-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: fullText, voice: voiceId }),
+        body: JSON.stringify({ text: fullText, voice: voiceId, apiKey: config.pollinationsApiKey || undefined }),
       });
       const data = await response.json();
       if (!response.ok) {

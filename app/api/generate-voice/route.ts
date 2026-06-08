@@ -7,16 +7,26 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { text, voice } = body as { text: string; voice: VoiceId };
+    const { text, voice, apiKey } = body as { text: string; voice: VoiceId; apiKey?: string };
 
     if (!text || !voice) {
       return NextResponse.json({ error: "Paramètres manquants pour générer la voix off." }, { status: 400 });
     }
 
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (process.env.POLLINATIONS_API_KEY) {
-      headers.Authorization = `Bearer ${process.env.POLLINATIONS_API_KEY}`;
+    const key = apiKey || process.env.POLLINATIONS_API_KEY;
+    if (!key) {
+      return NextResponse.json(
+        {
+          error:
+            "L'API Pollinations nécessite désormais une clé API (pk_ ou sk_) pour toutes les générations. Récupère ta clé sur enter.pollinations.ai et renseigne-la dans la configuration.",
+        },
+        { status: 401 }
+      );
     }
+    const headers: Record<string, string> = {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${key}`,
+    };
 
     const response = await fetch(TTS_ENDPOINT, {
       method: "POST",

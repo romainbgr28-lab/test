@@ -134,9 +134,21 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
               type="password"
               value={state.pollinationsApiKey}
               onChange={(e) => onChange({ pollinationsApiKey: e.target.value })}
-              placeholder="Laisse vide pour utiliser la clé du serveur"
+              placeholder="pk_... ou sk_... — laisse vide pour utiliser la clé du serveur"
               autoComplete="off"
             />
+            <p className="text-xs text-muted-foreground">
+              Obligatoire pour générer images, voix et textes. Crée une clé sur{" "}
+              <a
+                href="https://enter.pollinations.ai"
+                target="_blank"
+                rel="noreferrer"
+                className="underline"
+              >
+                enter.pollinations.ai
+              </a>
+              .
+            </p>
           </div>
         </div>
         <p className="-mt-2 text-xs text-muted-foreground">

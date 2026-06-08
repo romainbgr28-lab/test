@@ -21,6 +21,9 @@ export function getDimensionsForPlatform(platform: Platform): ImageDimensions {
   return { width: 1080, height: 1920 };
 }
 
+export const IMAGE_ENDPOINT = "https://gen.pollinations.ai/image";
+export const IMAGE_MODELS_ENDPOINT = "https://gen.pollinations.ai/image/models";
+
 export function buildImageUrl(params: {
   prompt: string;
   model: string;
@@ -34,7 +37,7 @@ export function buildImageUrl(params: {
     height: String(params.height),
     nologo: "true",
   });
-  return `https://image.pollinations.ai/prompt/${encoded}?${query.toString()}`;
+  return `${IMAGE_ENDPOINT}/${encoded}?${query.toString()}`;
 }
 
 export async function fetchImageAsDataUrl(url: string): Promise<string> {
@@ -56,22 +59,3 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
 }
 
 export const TTS_ENDPOINT = "https://text.pollinations.ai/";
-
-export async function callPollinationsTts(params: { text: string; voice: VoiceId }): Promise<Blob> {
-  const response = await fetch(TTS_ENDPOINT, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      model: "openai-audio",
-      voice: params.voice,
-      messages: [{ role: "user", content: params.text }],
-    }),
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Échec de la génération de la voix off (${response.status}) : ${errorText}`);
-  }
-
-  return await response.blob();
-}
