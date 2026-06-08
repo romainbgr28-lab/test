@@ -49,7 +49,10 @@ export interface StepConfigState {
   mistralApiKey: string;
   pollinationsApiKey: string;
   geminiApiKey: string;
+  leonardoApiKey: string;
 }
+
+type ApiKeyField = "mistralApiKey" | "pollinationsApiKey" | "geminiApiKey" | "leonardoApiKey";
 
 const API_KEYS_STORAGE_KEY = "studioai:apiKeys";
 
@@ -65,7 +68,7 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
     try {
       const raw = localStorage.getItem(API_KEYS_STORAGE_KEY);
       if (!raw) return;
-      const saved = JSON.parse(raw) as Partial<Pick<StepConfigState, "mistralApiKey" | "pollinationsApiKey" | "geminiApiKey">>;
+      const saved = JSON.parse(raw) as Partial<Pick<StepConfigState, ApiKeyField>>;
       onChange(saved);
     } catch {
       // clé localStorage absente ou invalide, on ignore
@@ -73,7 +76,7 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  function updateApiKey(patch: Partial<Pick<StepConfigState, "mistralApiKey" | "pollinationsApiKey" | "geminiApiKey">>) {
+  function updateApiKey(patch: Partial<Pick<StepConfigState, ApiKeyField>>) {
     onChange(patch);
     try {
       const raw = localStorage.getItem(API_KEYS_STORAGE_KEY);
@@ -187,6 +190,24 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
             />
             <p className="text-xs text-muted-foreground">
               Nécessaire pour générer des images avec les modèles Gemini (Nano Banana / Imagen).
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Clé API Leonardo</label>
+            <Input
+              type="password"
+              value={state.leonardoApiKey}
+              onChange={(e) => updateApiKey({ leonardoApiKey: e.target.value })}
+              placeholder="Laisse vide pour utiliser la clé du serveur"
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              Nécessaire pour générer des images avec les modèles Leonardo (Phoenix, FLUX, Nano Banana, etc.). Crée une
+              clé sur{" "}
+              <a href="https://app.leonardo.ai" target="_blank" rel="noreferrer" className="underline">
+                app.leonardo.ai
+              </a>
+              .
             </p>
           </div>
         </div>

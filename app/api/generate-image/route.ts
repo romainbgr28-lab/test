@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import { buildImageUrl, IMAGE_EDIT_ENDPOINT, modelSupportsReferenceImage } from "@/lib/pollinations";
 import { generateImageWithGemini } from "@/lib/gemini";
+import { generateImageWithLeonardo } from "@/lib/leonardo";
 
 export const runtime = "nodejs";
+
+const LEONARDO_MODEL_PREFIX = "leonardo:";
 
 function aspectRatioForPlatform(platform?: string): "9:16" | "16:9" | "1:1" {
   if (platform === "youtube") return "16:9";
@@ -20,21 +23,48 @@ function dataUrlToBuffer(dataUrl: string): { buffer: Buffer; contentType: string
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, model, width, height, apiKey, seed, referenceImage, provider, geminiApiKey, platform } = body as {
-      prompt: string;
-      model: string;
-      width: number;
-      height: number;
-      apiKey?: string;
-      seed?: number;
-      referenceImage?: string;
-      provider?: "pollinations" | "gemini";
-      geminiApiKey?: string;
-      platform?: string;
-    };
+    const { prompt, model, width, height, apiKey, seed, referenceImage, provider, geminiApiKey, leonardoApiKey, platform } =
+      body as {
+        prompt: string;
+        model: string;
+        width: number;
+        height: number;
+        apiKey?: string;
+        seed?: number;
+        referenceImage?: string;
+        provider?: "pollinations" | "gemini" | "leonardo";
+        geminiApiKey?: string;
+        leonardoApiKey?: string;
+        platform?: string;
+      };
 
     if (!prompt || !model || !width || !height) {
       return NextResponse.json({ error: "Paramètres manquants pour générer l'image." }, { status: 400 });
+    }
+
+    if (provider === "leonardo") {
+      const leonardoKey = leonardoApiKey || process.env.LEONARDO_API_KEY;
+      if (!leonardoKey) {
+        return NextResponse.json(
+          { error: "Une clé API Leonardo est requise pour générer des images avec Leonardo." },
+          { status: 401 }
+        );
+      }
+      const modelId = model.startsWith(LEONARDO_MODEL_PREFIX) ? model.slice(LEONARDO_MODEL_PREFIX.length) : model;
+      try {
+        const imageUrl = await generateImageWithLeonardo({
+          prompt,
+          apiKey: leonardoKey,
+          modelId,
+          width,
+          height,
+          referenceImage,
+        });
+        return NextResponse.json({ imageUrl });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Erreur Leonardo inconnue";
+        return NextResponse.json({ error: `Échec de la génération via Leonardo : ${message}` }, { status: 502 });
+      }
     }
 
     if (provider === "gemini") {

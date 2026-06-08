@@ -17,7 +17,7 @@ import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
 import { StepScript } from "./components/steps/StepScript";
-import { StepImages, isGeminiImageModel } from "./components/steps/StepImages";
+import { StepImages, isGeminiImageModel, isLeonardoImageModel } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
 import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
@@ -66,6 +66,7 @@ export default function Home() {
     mistralApiKey: "",
     pollinationsApiKey: "",
     geminiApiKey: "",
+    leonardoApiKey: "",
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
@@ -273,8 +274,9 @@ export default function Home() {
           seed,
           apiKey: config.pollinationsApiKey || undefined,
           referenceImage: referenceImage || undefined,
-          provider: isGeminiImageModel(imageModel) ? "gemini" : "pollinations",
+          provider: isGeminiImageModel(imageModel) ? "gemini" : isLeonardoImageModel(imageModel) ? "leonardo" : "pollinations",
           geminiApiKey: config.geminiApiKey || undefined,
+          leonardoApiKey: config.leonardoApiKey || undefined,
           platform: config.platform,
         }),
       });
@@ -501,6 +503,7 @@ export default function Home() {
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
           onSegmentPromptChange={handleSegmentPromptChange}
+          leonardoApiKey={config.leonardoApiKey}
           referenceImage={referenceImage}
           onReferenceImageChange={handleReferenceImageUpload}
           promptStyleSuffix={promptStyleSuffix}

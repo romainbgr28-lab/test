@@ -19,7 +19,9 @@ const GEMINI_MODEL_LABELS: Partial<Record<ImageModel, string>> = {
   "gemini-nano-banana": "Nano Banana Pro - Gratuit - Meilleur modèle",
 };
 
-function buildImageModelOptions(models: ImageModel[]) {
+export const LEONARDO_MODEL_PREFIX = "leonardo:";
+
+function buildImageModelOptions(models: ImageModel[], leonardoModels: { id: string; name: string; description?: string }[]) {
   const pollinationsOptions = models.map((key) => ({
     value: key,
     label: key,
@@ -30,11 +32,20 @@ function buildImageModelOptions(models: ImageModel[]) {
     label: GEMINI_MODEL_LABELS[key] as string,
     badge: "GRATUIT",
   }));
-  return [...pollinationsOptions, ...geminiOptions];
+  const leonardoOptions = leonardoModels.map((m) => ({
+    value: `${LEONARDO_MODEL_PREFIX}${m.id}`,
+    label: `${m.name} (Leonardo)`,
+    description: m.description ?? "Modèle Leonardo — coût en crédits API selon résolution et options",
+  }));
+  return [...pollinationsOptions, ...geminiOptions, ...leonardoOptions];
 }
 
 export function isGeminiImageModel(model: ImageModel): boolean {
   return model in GEMINI_MODEL_LABELS;
+}
+
+export function isLeonardoImageModel(model: ImageModel): boolean {
+  return model.startsWith(LEONARDO_MODEL_PREFIX);
 }
 
 interface StepImagesProps {
@@ -47,6 +58,7 @@ interface StepImagesProps {
   generatingImages: boolean;
   imageLoadingIds: Set<string>;
   onSegmentPromptChange: (id: string, imagePrompt: string) => void;
+  leonardoApiKey?: string;
   referenceImage?: string;
   onReferenceImageChange: (file: File | null) => void;
   promptStyleSuffix: string;
@@ -64,17 +76,21 @@ export function StepImages({
   generatingImages,
   imageLoadingIds,
   onSegmentPromptChange,
+  leonardoApiKey,
   referenceImage,
   onReferenceImageChange,
   promptStyleSuffix,
   onPromptStyleSuffixChange,
   onProceed,
 }: StepImagesProps) {
-  const [imageModelOptions, setImageModelOptions] = React.useState(() =>
-    buildImageModelOptions(FALLBACK_IMAGE_MODELS)
+  const [pollinationsModels, setPollinationsModels] = React.useState<ImageModel[]>(FALLBACK_IMAGE_MODELS);
+  const [leonardoModels, setLeonardoModels] = React.useState<{ id: string; name: string; description?: string }[]>([]);
+  const imageModelOptions = React.useMemo(
+    () => buildImageModelOptions(pollinationsModels, leonardoModels),
+    [pollinationsModels, leonardoModels]
   );
   const fileInputRef = React.useRef<HTMLInputElement>(null);
-  const supportsReference = modelSupportsReferenceImage(imageModel);
+  const supportsReference = modelSupportsReferenceImage(imageModel) || isLeonardoImageModel(imageModel);
 
   React.useEffect(() => {
     let cancelled = false;
@@ -82,7 +98,7 @@ export function StepImages({
       .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Échec du chargement des modèles"))))
       .then((data: { models?: ImageModel[] }) => {
         if (!cancelled && Array.isArray(data.models) && data.models.length > 0) {
-          setImageModelOptions(buildImageModelOptions(data.models));
+          setPollinationsModels(data.models);
         }
       })
       .catch(() => {
@@ -92,6 +108,31 @@ export function StepImages({
       cancelled = true;
     };
   }, []);
+
+  React.useEffect(() => {
+    if (!leonardoApiKey) {
+      setLeonardoModels([]);
+      return;
+    }
+    let cancelled = false;
+    fetch("/api/leonardo-models", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ apiKey: leonardoApiKey }),
+    })
+      .then((res) => (res.ok ? res.json() : Promise.reject(new Error("Échec du chargement des modèles Leonardo"))))
+      .then((data: { models?: { id: string; name: string; description?: string }[] }) => {
+        if (!cancelled && Array.isArray(data.models)) {
+          setLeonardoModels(data.models);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) setLeonardoModels([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leonardoApiKey]);
 
   const generatedCount = segments.filter((s) => !!s.imageUrl).length;
   const canProceed = generatedCount === segments.length && segments.length > 0;
@@ -118,7 +159,7 @@ export function StepImages({
           </CardHeader>
           <CardContent className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <ModelSelector
-              label="Modèle d'image (Pollinations)"
+              label="Modèle d'image (Pollinations / Gemini / Leonardo)"
               value={imageModel}
               onChange={(v) => onImageModelChange(v as ImageModel)}
               options={imageModelOptions}
@@ -137,8 +178,8 @@ export function StepImages({
             <div className="flex flex-col gap-1.5 lg:col-span-2">
               <label className="text-sm font-medium text-foreground">Image de référence (optionnel)</label>
               <p className="text-xs text-muted-foreground">
-                Sert de base visuelle pour guider le style et la composition. Compatible avec les modèles d&apos;édition :{" "}
-                {IMAGE_EDIT_MODELS.join(", ")}.
+                Sert de base visuelle pour guider le style et la composition. Compatible avec les modèles d&apos;édition
+                Pollinations ({IMAGE_EDIT_MODELS.join(", ")}) et avec tous les modèles Leonardo (image guidance).
               </p>
               <input
                 ref={fileInputRef}
@@ -169,7 +210,7 @@ export function StepImages({
               {referenceImage && !supportsReference && (
                 <p className="text-xs text-amber-500">
                   Le modèle « {imageModel} » ignore l&apos;image de référence : choisis un modèle d&apos;édition
-                  ci-dessus pour l&apos;utiliser ({IMAGE_EDIT_MODELS.join(", ")}).
+                  Pollinations ({IMAGE_EDIT_MODELS.join(", ")}) ou un modèle Leonardo pour l&apos;utiliser.
                 </p>
               )}
             </div>
