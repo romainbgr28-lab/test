@@ -51,7 +51,7 @@ export async function POST(request: Request) {
       }
       const { buffer, contentType } = dataUrlToBuffer(referenceImage);
       const form = new FormData();
-      form.append("image", new Blob([buffer], { type: contentType }), "reference.png");
+      form.append("image", new Blob([new Uint8Array(buffer)], { type: contentType }), "reference.png");
       form.append("prompt", prompt);
       form.append("model", model);
       form.append("size", `${width}x${height}`);
