@@ -41,6 +41,7 @@ const MISTRAL_OPTIONS = (Object.keys(MISTRAL_COSTS) as MistralModel[]).map((key)
 
 export interface StepConfigState {
   subject: string;
+  sourceContent: string;
   profile: NicheProfile | null;
   platform: Platform;
   duration: number;
@@ -107,6 +108,22 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
             placeholder="Ex: Les 3 erreurs qui ruinent ton épargne"
             className="min-h-[90px]"
           />
+        </div>
+
+        <div className="flex flex-col gap-1.5">
+          <label className="text-sm font-medium text-foreground">
+            Contenu source / recherche (optionnel)
+          </label>
+          <Textarea
+            value={state.sourceContent}
+            onChange={(e) => onChange({ sourceContent: e.target.value })}
+            placeholder="Colle ici tes propres informations, chiffres, faits, article ou notes. L'IA s'en servira comme source prioritaire et n'inventera rien. Si tu laisses vide, l'IA fait elle-même une recherche web sur le sujet."
+            className="min-h-[110px]"
+          />
+          <p className="text-xs text-muted-foreground">
+            Fournis ton propre contenu pour que le script soit calé précisément dessus. Sinon, l&apos;IA effectue une
+            vraie recherche web sur le sujet avant de rédiger.
+          </p>
         </div>
 
         <ProfileManager selectedId={state.profile?.id ?? null} onSelect={handleProfileSelect} />

@@ -272,11 +272,23 @@ export async function generateImageWithLeonardo(params: {
 
 interface ImageReferenceGuidance {
   image: { id: string; type: "UPLOADED" };
+  strength: "LOW" | "MID" | "HIGH";
 }
 
-// Les modèles tiers (GPT Image, Nano Banana...) passent par l'API unifiée v2 de Leonardo,
-// qui accepte un identifiant de modèle "byo" et jusqu'à 4 images de référence via
-// guidances.image_reference (cf. docs.leonardo.ai/docs/gpt-image-2 et /docs/nano-banana).
+// Les modèles tiers (GPT Image, Nano Banana) n'acceptent que des dimensions standard,
+// multiples de 16. On choisit la taille supportée la plus proche du ratio voulu
+// (portrait 9:16 → 1024x1536, paysage → 1536x1024, carré → 1024x1024).
+function standardSizeForV2(width: number, height: number): { width: number; height: number } {
+  if (height > width) return { width: 1024, height: 1536 };
+  if (width > height) return { width: 1536, height: 1024 };
+  return { width: 1024, height: 1024 };
+}
+
+// Les modèles tiers (GPT Image, Nano Banana...) passent par l'API unifiée v2 de Leonardo.
+// IMPORTANT : contrairement à l'API v1, tous les réglages de génération doivent être imbriqués
+// dans un objet "parameters" (sinon erreur "Unexpected variable ..."), avec "model" et "public"
+// au niveau racine. Les images de référence (jusqu'à 4) passent par parameters.guidances.image_reference.
+// cf. docs.leonardo.ai/docs/gpt-image-2 et /docs/nano-banana-2
 export async function generateImageWithLeonardoV2(params: {
   prompt: string;
   apiKey: string;
@@ -290,19 +302,27 @@ export async function generateImageWithLeonardoV2(params: {
   let imageReference: ImageReferenceGuidance[] | undefined;
   if (referenceImages && referenceImages.length > 0) {
     const ids = await Promise.all(referenceImages.slice(0, 4).map((image) => uploadInitImage(apiKey, image)));
-    imageReference = ids.map((id) => ({ image: { id, type: "UPLOADED" as const } }));
+    imageReference = ids.map((id) => ({ image: { id, type: "UPLOADED" as const }, strength: "MID" as const }));
   }
 
-  const body: Record<string, unknown> = {
-    model: modelId,
+  const size = standardSizeForV2(width, height);
+
+  const parameters: Record<string, unknown> = {
     prompt,
-    width,
-    height,
+    width: size.width,
+    height: size.height,
     quantity: 1,
+    prompt_enhance: "OFF",
   };
   if (imageReference) {
-    body.guidances = { image_reference: imageReference };
+    parameters.guidances = { image_reference: imageReference };
   }
+
+  const body = {
+    model: modelId,
+    parameters,
+    public: false,
+  };
 
   const response = await fetch(`${LEONARDO_BASE_V2}/generations`, {
     method: "POST",
@@ -311,11 +331,18 @@ export async function generateImageWithLeonardoV2(params: {
   });
   const data = await response.json().catch(() => null);
   if (!response.ok) {
-    throw new Error(data?.error ?? `Échec du lancement de la génération Leonardo (${modelId}).`);
+    const apiMessage =
+      (typeof data?.error === "string" && data.error) ||
+      (typeof data?.message === "string" && data.message) ||
+      JSON.stringify(data);
+    throw new Error(apiMessage || `Échec du lancement de la génération Leonardo (${modelId}).`);
   }
 
   const generationId: string | undefined =
-    data?.sdGenerationJob?.generationId ?? data?.generationId ?? data?.id;
+    data?.sdGenerationJob?.generationId ??
+    data?.generations_by_pk?.id ??
+    data?.generationId ??
+    data?.id;
   if (!generationId) {
     throw new Error("Réponse inattendue de Leonardo (identifiant de génération manquant).");
   }

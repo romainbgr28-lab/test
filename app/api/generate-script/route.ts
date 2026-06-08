@@ -32,6 +32,11 @@ const PLATFORM_LABELS: Record<Platform, string> = {
   reels: "Instagram Reels",
 };
 
+const LANGUAGE_LABELS: Record<Language, string> = {
+  fr: "français",
+  en: "anglais",
+};
+
 function encodeEvent(event: Record<string, unknown>): Uint8Array {
   return new TextEncoder().encode(`data: ${JSON.stringify(event)}\n\n`);
 }
@@ -74,6 +79,7 @@ export async function POST(request: Request) {
   const body = await request.json();
   const {
     subject,
+    sourceContent,
     platform,
     language,
     scriptInstructions,
@@ -85,6 +91,7 @@ export async function POST(request: Request) {
     existingSegment,
   } = body as {
     subject: string;
+    sourceContent?: string;
     platform: Platform;
     language: Language;
     scriptInstructions: string;
@@ -140,82 +147,112 @@ Aucun texte avant ou après le JSON.`;
   }
 
   const platformLabel = PLATFORM_LABELS[platform];
+  const languageLabel = LANGUAGE_LABELS[language];
+  const trimmedSource = sourceContent?.trim() ?? "";
 
   const stream = new ReadableStream<Uint8Array>({
     async start(controller) {
       const send = (event: Record<string, unknown>) => controller.enqueue(encodeEvent(event));
 
       try {
+        // ÉTAPE 1 — Constituer une note de recherche factuelle qui servira de base au script.
+        // Soit l'utilisateur a fourni son propre contenu (source prioritaire), soit on lance
+        // une vraie recherche web (en texte brut, séparée de l'écriture du JSON, sinon le modèle
+        // saute la recherche et répond de mémoire).
+        let researchBrief = "";
+
+        if (trimmedSource) {
+          send({ type: "status", message: "Contenu source fourni : utilisation comme base du script (aucune invention)." });
+          researchBrief = trimmedSource;
+        } else {
+          send({
+            type: "status",
+            message: `Recherche web en cours sur « ${subject} » (tendances et données récentes ${platformLabel})...`,
+          });
+          const researchInstruction = `Tu es un assistant de recherche rigoureux. Tu DOIS réellement utiliser l'outil de recherche web pour collecter des informations à jour : ne réponds jamais uniquement de mémoire. Réponds en ${languageLabel}.`;
+          const researchQuery = `Sujet à rechercher : "${subject}".
+Contexte / niche : ${scriptInstructions}
+Plateforme cible : ${platformLabel}.
+
+Effectue plusieurs recherches web et rédige une NOTE DE RECHERCHE dense et factuelle (pas un script, pas de JSON) contenant :
+- 6 à 10 faits, chiffres et statistiques RÉCENTS et vérifiables (précise l'ordre de grandeur, l'année et la source quand c'est possible)
+- les angles, accroches et tendances qui fonctionnent actuellement sur ce sujet
+- des exemples concrets, anecdotes ou cas réels marquants
+- les idées reçues à casser ou les vérités contre-intuitives
+N'invente aucune donnée : tout doit provenir de tes recherches.`;
+
+          try {
+            const result = await withHeartbeat(
+              callMistralWithWebSearch({ apiKey: key, model, instructions: researchInstruction, userMessage: researchQuery }),
+              send,
+              1
+            );
+            researchBrief = result.text.trim();
+            if (result.searchQueries.length > 0) {
+              send({
+                type: "status",
+                message: `Recherches effectuées : ${result.searchQueries.slice(0, 4).join(" • ")}`,
+              });
+            }
+            if (result.sources.length > 0) {
+              send({ type: "status", message: `${result.sources.length} source(s) web consultée(s).` });
+            }
+          } catch (searchError) {
+            console.error("Recherche web Mistral indisponible, repli sans recherche :", searchError);
+            send({
+              type: "status",
+              message: "Recherche web indisponible : rédaction avec les connaissances du modèle.",
+            });
+            researchBrief = "";
+          }
+        }
+
+        // ÉTAPE 2 — Écrire le script JSON, ancré dans la note de recherche, puis l'améliorer par itérations.
         let best: ScriptResponse | null = null;
         let previous: ScriptResponse | null = null;
+
+        const sourceLabel = trimmedSource
+          ? "CONTENU SOURCE FOURNI PAR L'UTILISATEUR (source prioritaire, à respecter, n'invente rien au-delà)"
+          : "NOTE DE RECHERCHE (informations réelles et récentes à intégrer, n'invente rien au-delà)";
+        const briefBlock = researchBrief
+          ? `\n\n${sourceLabel} :\n"""\n${researchBrief}\n"""\n`
+          : "";
 
         for (let iteration = 1; iteration <= MAX_ITERATIONS; iteration++) {
           let userPrompt: string;
           if (iteration === 1) {
-            send({
-              type: "status",
-              iteration,
-              message: `Recherche d'informations sur le sujet « ${subject} » et les tendances ${platformLabel}...`,
-            });
-            userPrompt = `Sujet : ${subject}
-
-Avant de rédiger, utilise la recherche web pour repérer les tendances actuelles, statistiques marquantes, angles populaires et formulations qui font le buzz sur ce sujet et sur des contenus ${platformLabel} similaires. Intègre ces informations réelles et récentes dans le script pour maximiser l'impact, la crédibilité et le score de viralité (objectif : 100/100).`;
+            send({ type: "status", iteration, message: "Rédaction du script à partir des informations collectées..." });
+            userPrompt = `Sujet : ${subject}${briefBlock}
+Rédige le script complet en t'appuyant sur ces informations : intègre les chiffres et faits concrets ci-dessus pour maximiser la crédibilité et le score de viralité (objectif : 100/100). Réponds uniquement avec le JSON demandé.`;
           } else {
             send({
               type: "status",
               iteration,
-              message: `Itération ${iteration}/${MAX_ITERATIONS} : nouvelle recherche pour combler les faiblesses détectées (score actuel ${previous!.viralityScore.score}/100)...`,
+              message: `Itération ${iteration}/${MAX_ITERATIONS} : amélioration du script (score actuel ${previous!.viralityScore.score}/100)...`,
             });
             userPrompt = `Le script précédent a obtenu un score de viralité de ${previous!.viralityScore.score}/100. Voici l'analyse :
 - Hook : ${previous!.viralityScore.hookStrength}
 - Risque de décrochage : ${previous!.viralityScore.retentionRisk}
 - Clarté du CTA : ${previous!.viralityScore.ctaClarity}
 - Suggestions à appliquer impérativement : ${previous!.viralityScore.suggestions.join(" / ")}
-
-Relance une recherche web pour creuser davantage le sujet "${subject}" (nouveaux angles, données chiffrées récentes, formulations virales actuelles), puis réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles. Ne te contente pas de reformuler : approfondis, muscle chaque segment et vise un score de 100/100.`;
+${briefBlock}
+Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles, en continuant de t'appuyer sur les informations factuelles ci-dessus. Ne te contente pas de reformuler : approfondis, muscle chaque segment et vise un score de 100/100. Réponds uniquement avec le JSON demandé.`;
           }
 
-          let rawText: string;
-          let searchQueries: string[] = [];
-          try {
-            const result = await withHeartbeat(
-              callMistralWithWebSearch({ apiKey: key, model, instructions: systemPrompt, userMessage: userPrompt }),
-              send,
-              iteration
-            );
-            rawText = result.text;
-            searchQueries = result.searchQueries;
-            if (searchQueries.length > 0) {
-              send({
-                type: "status",
-                iteration,
-                message: `Recherches effectuées sur le web : ${searchQueries.slice(0, 3).join(" • ")}`,
-              });
-            } else {
-              send({ type: "status", iteration, message: "Analyse des résultats de recherche en cours..." });
-            }
-          } catch (searchError) {
-            console.error("Recherche web Mistral indisponible, repli sans recherche :", searchError);
-            send({
-              type: "status",
-              iteration,
-              message: "Recherche web indisponible pour le moment, génération directe avec les connaissances du modèle...",
-            });
-            rawText = await withHeartbeat(
-              callMistralChat({
-                apiKey: key,
-                model,
-                messages: [
-                  { role: "system", content: systemPrompt },
-                  { role: "user", content: userPrompt },
-                ],
-              }),
-              send,
-              iteration
-            );
-          }
+          const rawText = await withHeartbeat(
+            callMistralChat({
+              apiKey: key,
+              model,
+              messages: [
+                { role: "system", content: systemPrompt },
+                { role: "user", content: userPrompt },
+              ],
+            }),
+            send,
+            iteration
+          );
 
-          send({ type: "status", iteration, message: "Rédaction du script et calcul du score de viralité..." });
+          send({ type: "status", iteration, message: "Analyse du script et calcul du score de viralité..." });
 
           const parsed = extractJson<ScriptResponse>(rawText);
           if (!parsed.segments || !Array.isArray(parsed.segments) || parsed.segments.length === 0) {

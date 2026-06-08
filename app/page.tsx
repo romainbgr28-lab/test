@@ -59,6 +59,7 @@ export default function Home() {
 
   const [config, setConfig] = React.useState<StepConfigState>({
     subject: "",
+    sourceContent: "",
     profile: null,
     platform: "tiktok",
     duration: 60,
@@ -115,6 +116,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: config.subject,
+          sourceContent: config.sourceContent || undefined,
           platform: config.platform,
           language: config.language,
           scriptInstructions: config.profile.scriptInstructions,
