@@ -1,5 +1,5 @@
-const IMAGEN_MODEL = "imagen-3.0-generate-002";
-const NANO_BANANA_MODEL = "gemini-2.5-flash-image-preview";
+const IMAGEN_MODEL = "imagen-4.0-generate-001";
+const NANO_BANANA_MODEL = "gemini-2.5-flash-image";
 
 async function generateWithImagen(
   prompt: string,
