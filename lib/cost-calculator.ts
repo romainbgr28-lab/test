@@ -9,6 +9,8 @@ export const IMAGE_COSTS: Partial<Record<ImageModel, { label: string; pollenPerI
   flux: { label: "Gratuit", pollenPerImage: 0 },
   turbo: { label: "0.003 Pollen/image", pollenPerImage: 0.003 },
   kontext: { label: "0.04 Pollen/image", pollenPerImage: 0.04 },
+  "gemini-imagen": { label: "Gratuit - 0€", pollenPerImage: 0 },
+  "gemini-nano-banana": { label: "Gratuit - 0€", pollenPerImage: 0 },
 };
 
 const POLLEN_TO_EUR = 0.01; // taux indicatif d'estimation

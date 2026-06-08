@@ -14,12 +14,27 @@ import { IMAGE_EDIT_MODELS, modelSupportsReferenceImage } from "@/lib/pollinatio
 
 const FALLBACK_IMAGE_MODELS = Object.keys(IMAGE_COSTS) as ImageModel[];
 
+const GEMINI_MODEL_LABELS: Partial<Record<ImageModel, string>> = {
+  "gemini-imagen": "Gemini Imagen 3 - Gratuit - Haute qualité",
+  "gemini-nano-banana": "Nano Banana Pro - Gratuit - Meilleur modèle",
+};
+
 function buildImageModelOptions(models: ImageModel[]) {
-  return models.map((key) => ({
+  const pollinationsOptions = models.map((key) => ({
     value: key,
     label: key,
     description: IMAGE_COSTS[key]?.label ?? "Modèle Pollinations",
   }));
+  const geminiOptions = (Object.keys(GEMINI_MODEL_LABELS) as ImageModel[]).map((key) => ({
+    value: key,
+    label: GEMINI_MODEL_LABELS[key] as string,
+    badge: "GRATUIT",
+  }));
+  return [...pollinationsOptions, ...geminiOptions];
+}
+
+export function isGeminiImageModel(model: ImageModel): boolean {
+  return model in GEMINI_MODEL_LABELS;
 }
 
 interface StepImagesProps {

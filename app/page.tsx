@@ -17,7 +17,7 @@ import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
 import { StepScript } from "./components/steps/StepScript";
-import { StepImages } from "./components/steps/StepImages";
+import { StepImages, isGeminiImageModel } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
 import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
@@ -65,6 +65,7 @@ export default function Home() {
     mistralModel: "mistral-small-latest",
     mistralApiKey: "",
     pollinationsApiKey: "",
+    geminiApiKey: "",
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
@@ -272,6 +273,9 @@ export default function Home() {
           seed,
           apiKey: config.pollinationsApiKey || undefined,
           referenceImage: referenceImage || undefined,
+          provider: isGeminiImageModel(imageModel) ? "gemini" : "pollinations",
+          geminiApiKey: config.geminiApiKey || undefined,
+          platform: config.platform,
         }),
       });
       const data = await response.json();

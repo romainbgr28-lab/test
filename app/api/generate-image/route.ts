@@ -1,7 +1,13 @@
 import { NextResponse } from "next/server";
 import { buildImageUrl, IMAGE_EDIT_ENDPOINT, modelSupportsReferenceImage } from "@/lib/pollinations";
+import { generateImageWithGemini } from "@/lib/gemini";
 
 export const runtime = "nodejs";
+
+function aspectRatioForPlatform(platform?: string): "9:16" | "16:9" | "1:1" {
+  if (platform === "youtube") return "16:9";
+  return "9:16";
+}
 
 function dataUrlToBuffer(dataUrl: string): { buffer: Buffer; contentType: string } {
   const match = /^data:([^;]+);base64,(.*)$/.exec(dataUrl);
@@ -14,7 +20,7 @@ function dataUrlToBuffer(dataUrl: string): { buffer: Buffer; contentType: string
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const { prompt, model, width, height, apiKey, seed, referenceImage } = body as {
+    const { prompt, model, width, height, apiKey, seed, referenceImage, provider, geminiApiKey, platform } = body as {
       prompt: string;
       model: string;
       width: number;
@@ -22,10 +28,30 @@ export async function POST(request: Request) {
       apiKey?: string;
       seed?: number;
       referenceImage?: string;
+      provider?: "pollinations" | "gemini";
+      geminiApiKey?: string;
+      platform?: string;
     };
 
     if (!prompt || !model || !width || !height) {
       return NextResponse.json({ error: "Paramètres manquants pour générer l'image." }, { status: 400 });
+    }
+
+    if (provider === "gemini") {
+      const geminiKey = geminiApiKey || process.env.GEMINI_API_KEY;
+      if (!geminiKey) {
+        return NextResponse.json(
+          { error: "Une clé API Gemini est requise pour générer des images avec Gemini." },
+          { status: 401 }
+        );
+      }
+      try {
+        const imageUrl = await generateImageWithGemini(prompt, geminiKey, aspectRatioForPlatform(platform));
+        return NextResponse.json({ imageUrl });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Erreur Gemini inconnue";
+        return NextResponse.json({ error: `Échec de la génération via Gemini : ${message}` }, { status: 502 });
+      }
     }
 
     const key = apiKey || process.env.POLLINATIONS_API_KEY;

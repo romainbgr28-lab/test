@@ -8,6 +8,7 @@ export interface SelectOption {
   value: string;
   label: string;
   description?: string;
+  badge?: string;
 }
 
 interface SelectProps {
@@ -40,8 +41,15 @@ export function Select({ value, onChange, options, placeholder, className }: Sel
         onClick={() => setOpen((o) => !o)}
         className="flex h-10 w-full items-center justify-between rounded-md border border-border bg-secondary px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       >
-        <span className={cn(!selected && "text-muted-foreground")}>
-          {selected ? selected.label : placeholder ?? "Sélectionner..."}
+        <span className="flex items-center gap-2">
+          <span className={cn(!selected && "text-muted-foreground")}>
+            {selected ? selected.label : placeholder ?? "Sélectionner..."}
+          </span>
+          {selected?.badge && (
+            <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+              {selected.badge}
+            </span>
+          )}
         </span>
         <ChevronDown className="h-4 w-4 opacity-60" />
       </button>
@@ -60,7 +68,14 @@ export function Select({ value, onChange, options, placeholder, className }: Sel
                 option.value === value && "bg-accent"
               )}
             >
-              <span>{option.label}</span>
+              <span className="flex items-center gap-2">
+                {option.label}
+                {option.badge && (
+                  <span className="rounded-full bg-emerald-500/15 px-2 py-0.5 text-[10px] font-medium text-emerald-400">
+                    {option.badge}
+                  </span>
+                )}
+              </span>
               {option.description && (
                 <span className="text-xs text-muted-foreground">{option.description}</span>
               )}

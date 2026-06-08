@@ -48,7 +48,10 @@ export interface StepConfigState {
   mistralModel: MistralModel;
   mistralApiKey: string;
   pollinationsApiKey: string;
+  geminiApiKey: string;
 }
+
+const API_KEYS_STORAGE_KEY = "studioai:apiKeys";
 
 interface StepConfigProps {
   state: StepConfigState;
@@ -58,6 +61,29 @@ interface StepConfigProps {
 }
 
 export function StepConfig({ state, onChange, onGenerate, generating }: StepConfigProps) {
+  React.useEffect(() => {
+    try {
+      const raw = localStorage.getItem(API_KEYS_STORAGE_KEY);
+      if (!raw) return;
+      const saved = JSON.parse(raw) as Partial<Pick<StepConfigState, "mistralApiKey" | "pollinationsApiKey" | "geminiApiKey">>;
+      onChange(saved);
+    } catch {
+      // clé localStorage absente ou invalide, on ignore
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function updateApiKey(patch: Partial<Pick<StepConfigState, "mistralApiKey" | "pollinationsApiKey" | "geminiApiKey">>) {
+    onChange(patch);
+    try {
+      const raw = localStorage.getItem(API_KEYS_STORAGE_KEY);
+      const saved = raw ? JSON.parse(raw) : {};
+      localStorage.setItem(API_KEYS_STORAGE_KEY, JSON.stringify({ ...saved, ...patch }));
+    } catch {
+      // stockage indisponible, on ignore
+    }
+  }
+
   function handleProfileSelect(profile: NicheProfile) {
     onChange({ profile, platform: profile.platform, language: profile.language });
   }
@@ -123,7 +149,7 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
             <Input
               type="password"
               value={state.mistralApiKey}
-              onChange={(e) => onChange({ mistralApiKey: e.target.value })}
+              onChange={(e) => updateApiKey({ mistralApiKey: e.target.value })}
               placeholder="Laisse vide pour utiliser la clé du serveur"
               autoComplete="off"
             />
@@ -133,7 +159,7 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
             <Input
               type="password"
               value={state.pollinationsApiKey}
-              onChange={(e) => onChange({ pollinationsApiKey: e.target.value })}
+              onChange={(e) => updateApiKey({ pollinationsApiKey: e.target.value })}
               placeholder="pk_... ou sk_... — laisse vide pour utiliser la clé du serveur"
               autoComplete="off"
             />
@@ -148,6 +174,19 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
                 enter.pollinations.ai
               </a>
               .
+            </p>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Clé API Gemini</label>
+            <Input
+              type="password"
+              value={state.geminiApiKey}
+              onChange={(e) => updateApiKey({ geminiApiKey: e.target.value })}
+              placeholder="Laisse vide pour utiliser la clé du serveur"
+              autoComplete="off"
+            />
+            <p className="text-xs text-muted-foreground">
+              Nécessaire pour générer des images avec les modèles Gemini (Nano Banana / Imagen).
             </p>
           </div>
         </div>
