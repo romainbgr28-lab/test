@@ -244,7 +244,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
   const canvas = document.createElement("canvas");
   canvas.width = width;
   canvas.height = height;
-  const ctx = canvas.getContext("2d");
+  const ctx = canvas.getContext("2d")!;
   if (!ctx) throw new Error("Canvas indisponible.");
 
   const captions = buildCaptions(ordered);
