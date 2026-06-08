@@ -46,7 +46,8 @@ export async function POST(request: Request) {
         );
       }
       try {
-        const imageUrl = await generateImageWithGemini(prompt, geminiKey, aspectRatioForPlatform(platform));
+        const geminiModel = model === "gemini-imagen" ? "gemini-imagen" : "gemini-nano-banana";
+        const imageUrl = await generateImageWithGemini(prompt, geminiKey, geminiModel, aspectRatioForPlatform(platform));
         return NextResponse.json({ imageUrl });
       } catch (error) {
         const message = error instanceof Error ? error.message : "Erreur Gemini inconnue";
