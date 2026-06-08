@@ -1,6 +1,7 @@
 import type { Language, Platform } from "@/types";
 
 export const MISTRAL_ENDPOINT = "https://api.mistral.ai/v1/chat/completions";
+export const MISTRAL_CONVERSATIONS_ENDPOINT = "https://api.mistral.ai/v1/conversations";
 
 const PLATFORM_LABELS: Record<Platform, string> = {
   tiktok: "TikTok",
@@ -56,6 +57,13 @@ RÈGLES VISUELLES :
 - Spécifier : sujet principal, éclairage, couleurs dominantes, style (cinématique, minimaliste, etc.), émotion recherchée
 - Les visuels doivent RENFORCER la narration, pas juste l'illustrer
 - Varier les types de plans : close-up, wide shot, abstract, data visualization, metaphor visuelle
+
+RECHERCHE WEB OBLIGATOIRE :
+Tu as accès à un outil de recherche internet en temps réel. Utilise-le systématiquement avant de rédiger pour :
+- trouver les tendances, sujets chauds et formulations qui cartonnent en ce moment sur ce thème et sur cette plateforme
+- collecter des chiffres, statistiques et faits récents et vérifiables à intégrer dans la narration pour renforcer la crédibilité et l'effet "wahou"
+- repérer les angles et accroches qui fonctionnent déjà sur des contenus similaires, pour t'en inspirer sans copier
+N'invente jamais une statistique : si tu avances un chiffre, il doit provenir d'une recherche réelle.
 
 Niche et instructions : ${params.nicheInstructions}
 Plateforme : ${platformLabel}
@@ -115,6 +123,89 @@ export async function callMistralChat(params: MistralChatParams): Promise<string
     throw new Error("Réponse Mistral invalide : aucun contenu trouvé.");
   }
   return content;
+}
+
+export interface MistralWebSearchParams {
+  apiKey: string;
+  model: string;
+  instructions: string;
+  userMessage: string;
+}
+
+export interface MistralWebSearchResult {
+  text: string;
+  searchQueries: string[];
+  sources: string[];
+}
+
+/**
+ * Calls Mistral's Conversations API with the built-in `web_search` connector,
+ * letting the model autonomously search the web before answering.
+ */
+export async function callMistralWithWebSearch(params: MistralWebSearchParams): Promise<MistralWebSearchResult> {
+  const response = await fetch(MISTRAL_CONVERSATIONS_ENDPOINT, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${params.apiKey}`,
+    },
+    body: JSON.stringify({
+      model: params.model,
+      instructions: params.instructions,
+      inputs: [{ role: "user", content: params.userMessage }],
+      tools: [{ type: "web_search" }],
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Mistral Conversations API a répondu avec une erreur (${response.status}) : ${errorText}`);
+  }
+
+  const data = await response.json();
+  const outputs: unknown[] = Array.isArray(data?.outputs) ? data.outputs : [];
+
+  const searchQueries: string[] = [];
+  const sources: string[] = [];
+  let text = "";
+
+  for (const entry of outputs) {
+    if (!entry || typeof entry !== "object") continue;
+    const item = entry as Record<string, unknown>;
+
+    if (item.type === "tool.execution") {
+      const args = item.arguments as Record<string, unknown> | undefined;
+      const info = item.info as Record<string, unknown> | undefined;
+      const query = (args?.query ?? info?.query) as unknown;
+      if (typeof query === "string" && query.trim()) {
+        searchQueries.push(query.trim());
+      }
+    }
+
+    if (item.type === "message.output") {
+      const content = item.content;
+      if (typeof content === "string") {
+        text += content;
+      } else if (Array.isArray(content)) {
+        for (const chunk of content) {
+          if (!chunk || typeof chunk !== "object") continue;
+          const c = chunk as Record<string, unknown>;
+          if (c.type === "text" && typeof c.text === "string") {
+            text += c.text;
+          } else if (c.type === "tool_reference") {
+            const url = (c.url ?? c.source) as unknown;
+            if (typeof url === "string" && url.trim()) sources.push(url.trim());
+          }
+        }
+      }
+    }
+  }
+
+  if (!text.trim()) {
+    throw new Error("Réponse Mistral (recherche web) invalide : aucun contenu trouvé.");
+  }
+
+  return { text, searchQueries: [...new Set(searchQueries)], sources: [...new Set(sources)] };
 }
 
 export function extractJson<T>(raw: string): T {

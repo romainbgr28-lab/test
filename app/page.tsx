@@ -68,6 +68,7 @@ export default function Home() {
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
+  const [scriptProgress, setScriptProgress] = React.useState<{ message: string; score?: number }[]>([]);
   const [viralityScore, setViralityScore] = React.useState<ViralityScore | null>(null);
   const [segments, setSegments] = React.useState<VideoSegment[]>([]);
   const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
@@ -106,6 +107,7 @@ export default function Home() {
     setViralityScore(null);
     setSegments([]);
     setScriptValidated(false);
+    setScriptProgress([]);
     try {
       const response = await fetch("/api/generate-script", {
         method: "POST",
@@ -120,12 +122,45 @@ export default function Home() {
           apiKey: config.mistralApiKey || undefined,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) {
+
+      if (!response.ok || !response.body) {
+        const data = await response.json().catch(() => null);
         throw new Error(data?.error ?? "Erreur lors de la génération du script.");
       }
-      setViralityScore(data.viralityScore);
-      setSegments((data.segments as RawSegment[]).map(toSegment));
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let result: { viralityScore: ViralityScore; segments: RawSegment[] } | null = null;
+      let streamError: string | null = null;
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const chunk of chunks) {
+          const line = chunk.trim();
+          if (!line.startsWith("data:")) continue;
+          const jsonStr = line.slice(5).trim();
+          if (!jsonStr) continue;
+          const event = JSON.parse(jsonStr) as { type: string; message?: string; score?: number; viralityScore?: ViralityScore; segments?: RawSegment[] };
+          if (event.type === "status" && event.message) {
+            setScriptProgress((prev) => [...prev, { message: event.message!, score: event.score }]);
+          } else if (event.type === "result" && event.viralityScore && event.segments) {
+            result = { viralityScore: event.viralityScore, segments: event.segments };
+          } else if (event.type === "error" && event.message) {
+            streamError = event.message;
+          }
+        }
+      }
+
+      if (streamError) throw new Error(streamError);
+      if (!result) throw new Error("Aucun script n'a été généré.");
+
+      setViralityScore(result.viralityScore);
+      setSegments(result.segments.map(toSegment));
       setCurrentStep(1);
       setUnlockedStep((u) => Math.max(u, 1));
       toast({ title: "Script généré !", description: "Relis et ajuste les segments avant de valider.", variant: "success" });
@@ -438,6 +473,7 @@ export default function Home() {
       {currentStep === 1 && (
         <StepScript
           loading={generatingScript}
+          progress={scriptProgress}
           viralityScore={viralityScore}
           segments={segments}
           onSegmentChange={handleSegmentChange}
