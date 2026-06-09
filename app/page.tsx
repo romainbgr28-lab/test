@@ -301,22 +301,48 @@ export default function Home() {
     }
   }
 
+  const IMAGE_INTERVAL = 2.5; // seconds between image changes
+
+  function getImageCountForSegment(segment: VideoSegment): number {
+    return Math.max(1, Math.ceil(segment.duration / IMAGE_INTERVAL));
+  }
+
+  async function generateImagesForSegment(
+    segment: VideoSegment,
+    index: number
+  ): Promise<{ imageUrl: string | null; imageUrls: string[]; isVariation: boolean }> {
+    const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
+    const count = getImageCountForSegment(segment);
+    if (count <= 1) {
+      const imageUrl = await generateImageForSegment(segment, prompt, referenceImages);
+      return { imageUrl, imageUrls: imageUrl ? [imageUrl] : [], isVariation };
+    }
+    const urls = await Promise.all(
+      Array.from({ length: count }, (_, i) => {
+        const variationPrompt = i === 0 ? prompt : `${prompt}, slight variation`;
+        const seed = segment.order * 1000 + i * 137;
+        return generateImageForSegment(segment, variationPrompt, referenceImages, seed);
+      })
+    );
+    const imageUrls = urls.filter((u): u is string => !!u);
+    return { imageUrl: imageUrls[0] ?? null, imageUrls, isVariation };
+  }
+
   async function handleGenerateAllImages() {
     setGeneratingImages(true);
     setImageLoadingIds(new Set(segments.map((s) => s.id)));
     try {
       const results = await Promise.all(
         segments.map(async (segment, index) => {
-          const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
-          const imageUrl = await generateImageForSegment(segment, prompt, referenceImages);
-          return { id: segment.id, imageUrl, isVariation };
+          const result = await generateImagesForSegment(segment, index);
+          return { id: segment.id, ...result };
         })
       );
       setSegments((prev) =>
         prev.map((s) => {
           const result = results.find((r) => r.id === s.id);
           if (result?.imageUrl) {
-            return { ...s, imageUrl: result.imageUrl, imageBlob: result.imageUrl, isSceneVariation: result.isVariation };
+            return { ...s, imageUrl: result.imageUrl, imageBlob: result.imageUrl, imageUrls: result.imageUrls, isSceneVariation: result.isVariation };
           }
           return s;
         })
@@ -324,7 +350,7 @@ export default function Home() {
       const successCount = results.filter((r) => r.imageUrl).length;
       toast({
         title: "Génération des images terminée",
-        description: `${successCount}/${segments.length} images générées avec succès.`,
+        description: `${successCount}/${segments.length} segments générés avec succès.`,
         variant: successCount === segments.length ? "success" : "info",
       });
     } finally {
@@ -338,14 +364,12 @@ export default function Home() {
     if (index === -1) return;
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
-    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, referenceImages, seed);
-    if (imageUrl) {
+    const result = await generateImagesForSegment(segment, index);
+    if (result.imageUrl) {
       setSegments((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
+        prev.map((s) => s.id === id ? { ...s, imageUrl: result.imageUrl!, imageBlob: result.imageUrl!, imageUrls: result.imageUrls, isSceneVariation: result.isVariation } : s)
       );
-      toast({ title: `Image du segment ${segment.order} régénérée`, variant: "success" });
+      toast({ title: `Images du segment ${segment.order} régénérées (${result.imageUrls.length})`, variant: "success" });
     }
     setImageLoadingIds((prev) => {
       const next = new Set(prev);
@@ -360,14 +384,20 @@ export default function Home() {
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
     const { prompt: basePrompt, referenceImages } = getEffectivePrompt(index);
-    const prompt = `${basePrompt}, slight variation, same composition, different angle`;
-    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, referenceImages, seed);
-    if (imageUrl) {
+    const count = getImageCountForSegment(segment);
+    const urls = await Promise.all(
+      Array.from({ length: count }, (_, i) => {
+        const prompt = `${basePrompt}, slight variation, same composition, different angle`;
+        const seed = segment.order * 1000 + Math.floor(Math.random() * 999) + i * 137;
+        return generateImageForSegment(segment, prompt, referenceImages, seed);
+      })
+    );
+    const imageUrls = urls.filter((u): u is string => !!u);
+    if (imageUrls.length > 0) {
       setSegments((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
+        prev.map((s) => s.id === id ? { ...s, imageUrl: imageUrls[0], imageBlob: imageUrls[0], imageUrls, isSceneVariation: true } : s)
       );
-      toast({ title: `Variation générée pour le segment ${segment.order}`, variant: "success" });
+      toast({ title: `${imageUrls.length} variations générées pour le segment ${segment.order}`, variant: "success" });
     }
     setImageLoadingIds((prev) => {
       const next = new Set(prev);

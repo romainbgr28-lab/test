@@ -31,13 +31,17 @@ export function buildBeats(segments: VideoSegment[], beatDuration: number): Beat
   let ti = 0;
 
   for (const segment of [...segments].sort((a, b) => a.order - b.order)) {
-    const imgUrl = segment.imageBlob || segment.imageUrl || "";
+    const fallback = segment.imageBlob || segment.imageUrl || "";
+    const imgs = segment.imageUrls && segment.imageUrls.length > 0 ? segment.imageUrls : [fallback];
     let t = cursor;
     const segEnd = cursor + segment.duration;
+    let beatIndexInSeg = 0;
     while (t < segEnd - 0.01) {
       const beatEnd = Math.min(t + beatDuration, segEnd);
+      const imgUrl = imgs[beatIndexInSeg % imgs.length];
       beats.push({ startTime: t, endTime: beatEnd, imageUrl: imgUrl, ...TRAJECTORIES[ti % TRAJECTORIES.length] });
       ti++;
+      beatIndexInSeg++;
       t = beatEnd;
     }
     cursor = segEnd;
@@ -46,7 +50,15 @@ export function buildBeats(segments: VideoSegment[], beatDuration: number): Beat
 }
 
 export async function loadImages(segments: VideoSegment[]): Promise<Map<string, HTMLImageElement>> {
-  const urls = [...new Set(segments.map((s) => s.imageBlob || s.imageUrl || "").filter(Boolean))];
+  const urls = [
+    ...new Set(
+      segments.flatMap((s) =>
+        s.imageUrls && s.imageUrls.length > 0
+          ? s.imageUrls
+          : [s.imageBlob || s.imageUrl || ""]
+      ).filter(Boolean)
+    ),
+  ];
   const map = new Map<string, HTMLImageElement>();
   await Promise.all(
     urls.map(

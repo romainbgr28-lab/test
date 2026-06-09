@@ -28,6 +28,7 @@ export interface VideoSegment {
   duration: number;
   imageUrl?: string;
   imageBlob?: string;
+  imageUrls?: string[];
   isSceneVariation?: boolean;
   imagePrompt?: string;
 }

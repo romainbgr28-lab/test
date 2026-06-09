@@ -82,7 +82,7 @@ export function StepImages({
     };
   }, [leonardoApiKey]);
 
-  const generatedCount = segments.filter((s) => !!s.imageUrl).length;
+  const generatedCount = segments.filter((s) => !!(s.imageUrls?.length || s.imageUrl)).length;
   const canProceed = generatedCount === segments.length && segments.length > 0;
 
   return (
@@ -159,25 +159,48 @@ export function StepImages({
               <Card key={segment.id} className="overflow-hidden">
                 <CardContent className="flex flex-col gap-4 p-4 sm:flex-row sm:p-5">
                   <div className="flex w-full shrink-0 flex-col gap-2 sm:w-56">
-                    <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg border border-border bg-secondary">
-                      {loading ? (
+                    {loading ? (
+                      <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg border border-border bg-secondary">
                         <Skeleton className="h-full w-full" />
-                      ) : segment.imageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element
-                        <img
-                          src={segment.imageUrl}
-                          alt={`Visuel segment ${segment.order}`}
-                          className="h-full w-full object-cover"
-                        />
-                      ) : (
-                        <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
-                          Segment {segment.order}
+                      </div>
+                    ) : segment.imageUrls && segment.imageUrls.length > 1 ? (
+                      <div className="flex flex-col gap-1">
+                        <div className="grid grid-cols-2 gap-1">
+                          {segment.imageUrls.map((url, i) => (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <div key={i} className="relative aspect-[9/16] overflow-hidden rounded-md border border-border bg-secondary">
+                              <img src={url} alt={`Visuel ${segment.order}.${i + 1}`} className="h-full w-full object-cover" />
+                              <span className="absolute bottom-0.5 right-1 text-[9px] font-bold text-white/80 drop-shadow">
+                                {i + 1}
+                              </span>
+                            </div>
+                          ))}
                         </div>
-                      )}
-                    </div>
+                      </div>
+                    ) : (
+                      <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg border border-border bg-secondary">
+                        {segment.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img
+                            src={segment.imageUrl}
+                            alt={`Visuel segment ${segment.order}`}
+                            className="h-full w-full object-cover"
+                          />
+                        ) : (
+                          <div className="flex h-full w-full items-center justify-center text-sm text-muted-foreground">
+                            Segment {segment.order}
+                          </div>
+                        )}
+                      </div>
+                    )}
                     <div className="flex items-center justify-between gap-1">
                       <span className="flex items-center gap-1 text-xs text-muted-foreground">
                         Segment {segment.order} · {segment.duration}s
+                        {segment.imageUrls && segment.imageUrls.length > 1 && (
+                          <span className="ml-1 rounded-full bg-secondary px-1.5 py-0.5 text-[10px] font-medium">
+                            {segment.imageUrls.length} imgs
+                          </span>
+                        )}
                       </span>
                       {segment.isSceneVariation && (
                         <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
