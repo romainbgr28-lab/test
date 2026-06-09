@@ -304,6 +304,9 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
     }
   }
 
+  // Resume AudioContext — it may be suspended even after a user gesture
+  await audioContext.resume();
+
   const canvasStream = (canvas as HTMLCanvasElement & { captureStream: (fps: number) => MediaStream }).captureStream(fps);
   const tracks = [...canvasStream.getVideoTracks(), ...audioDest.stream.getAudioTracks()];
   const stream = new MediaStream(tracks);
@@ -319,14 +322,19 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
   });
 
-  const startAt = audioContext.currentTime + 0.1;
+  // Schedule audio sources and start recording
+  const startAt = audioContext.currentTime + 0.05;
   for (const source of audioSources) source.start(startAt);
-  recorder.start();
+
+  // Flush data every 500ms so the MP4/WebM container gets proper chunks
+  recorder.start(500);
+
+  // Use performance.now() as clock — reliable regardless of AudioContext state
+  const wallStart = performance.now();
 
   await new Promise<void>((resolve) => {
     function frame() {
-      const elapsed = audioContext.currentTime - startAt;
-      const t = Math.max(0, elapsed);
+      const t = (performance.now() - wallStart) / 1000;
 
       ctx.fillStyle = "#000000";
       ctx.fillRect(0, 0, width, height);
@@ -339,7 +347,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
           break;
         }
         acc += ordered[i].duration;
-        index = i;
+        index = ordered.length - 1;
       }
       const segStart = ordered.slice(0, index).reduce((s, seg) => s + seg.duration, 0);
       const segDuration = ordered[index].duration;
@@ -363,9 +371,9 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
         drawSubtitles(ctx, captions[index], t, width, height, options.subtitleStyle);
       }
 
-      if (onProgress) onProgress(0.05 + (t / totalDuration) * 0.8, "Rendu de la vidéo...");
+      if (onProgress) onProgress(0.05 + Math.min(t / totalDuration, 1) * 0.8, "Rendu de la vidéo...");
 
-      if (elapsed >= totalDuration) {
+      if (t >= totalDuration) {
         resolve();
         return;
       }
@@ -376,11 +384,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
 
   recorder.stop();
   for (const source of audioSources) {
-    try {
-      source.stop();
-    } catch {
-      // already stopped
-    }
+    try { source.stop(); } catch { /* already stopped */ }
   }
   const recordedBlob = await recordingDone;
   await audioContext.close();
