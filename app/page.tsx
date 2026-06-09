@@ -646,8 +646,6 @@ export default function Home() {
           generatingMetadata={generatingMetadata}
           onGenerateMetadata={handleGenerateMetadata}
           onProceed={handleProceedToExport}
-          googleTtsKey={config.googleTtsKey}
-          onGoogleTtsKeyChange={(key) => updateConfig({ googleTtsKey: key })}
         />
       )}
 
