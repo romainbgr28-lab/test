@@ -12,9 +12,13 @@ export function getProfiles(): NicheProfile[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
-    const parsed = JSON.parse(raw) as NicheProfile[];
+    const parsed = JSON.parse(raw) as (NicheProfile & { instructions?: string })[];
     if (!Array.isArray(parsed)) return [];
-    return parsed;
+    return parsed.map((p) => ({
+      ...p,
+      scriptInstructions: p.scriptInstructions ?? p.instructions ?? "",
+      viralityInstructions: p.viralityInstructions ?? "",
+    }));
   } catch {
     return [];
   }

@@ -13,13 +13,14 @@ import type {
   VideoRenderOptions,
   VideoSegment,
   ViralityScore,
+  VisualStyle,
   VoiceId,
 } from "@/types";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
 import { StepScript } from "./components/steps/StepScript";
-import { StepImages, isGeminiImageModel } from "./components/steps/StepImages";
+import { StepImages } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
 import { StepVideo } from "./components/steps/StepVideo";
 import { StepExport } from "./components/steps/StepExport";
@@ -63,6 +64,7 @@ export default function Home() {
 
   const [config, setConfig] = React.useState<StepConfigState>({
     subject: "",
+    sourceContent: "",
     profile: null,
     platform: "tiktok",
     duration: 60,
@@ -70,7 +72,7 @@ export default function Home() {
     mistralModel: "mistral-small-latest",
     mistralApiKey: "",
     pollinationsApiKey: "",
-    geminiApiKey: "",
+    leonardoApiKey: "",
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
@@ -80,11 +82,11 @@ export default function Home() {
   const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
 
-  const [imageModel, setImageModel] = React.useState<ImageModel>("flux");
+  const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
-  const [referenceImage, setReferenceImage] = React.useState<string | undefined>(undefined);
-  const [promptStyleSuffix, setPromptStyleSuffix] = React.useState("");
+  const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
+  const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
 
   const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
@@ -136,9 +138,11 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: config.subject,
+          sourceContent: config.sourceContent || undefined,
           platform: config.platform,
           language: config.language,
-          nicheInstructions: config.profile.instructions,
+          scriptInstructions: config.profile.scriptInstructions,
+          viralityInstructions: config.profile.viralityInstructions || undefined,
           duration: config.duration,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
@@ -211,7 +215,8 @@ export default function Home() {
           subject: config.subject,
           platform: config.platform,
           language: config.language,
-          nicheInstructions: config.profile.instructions,
+          scriptInstructions: config.profile.scriptInstructions,
+          viralityInstructions: config.profile.viralityInstructions || undefined,
           duration: config.duration,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
@@ -254,27 +259,25 @@ export default function Home() {
     const segment = segments[index];
     const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
     const base = segment.imagePrompt?.trim() || suggested;
-    const prompt = promptStyleSuffix.trim() ? `${base}, ${promptStyleSuffix.trim()}` : base;
-    return { prompt, isVariation };
+    const referenceImages = selectedVisualStyle?.referenceImages?.length
+      ? selectedVisualStyle.referenceImages
+      : undefined;
+    return { prompt: base, isVariation, referenceImages };
   }
 
   function handleSegmentPromptChange(id: string, imagePrompt: string) {
     setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
   }
 
-  function handleReferenceImageUpload(file: File | null) {
-    if (!file) {
-      setReferenceImage(undefined);
-      return;
-    }
-    const reader = new FileReader();
-    reader.onloadend = () => setReferenceImage(reader.result as string);
-    reader.readAsDataURL(file);
+  function handleSelectVisualStyle(style: VisualStyle | null) {
+    setSelectedVisualStyle(style);
+    setSelectedVisualStyleId(style?.id ?? null);
   }
 
   async function generateImageForSegment(
     segment: VideoSegment,
     promptOverride: string,
+    referenceImages?: string[],
     seedOverride?: number
   ): Promise<string | null> {
     if (!config.profile) return null;
@@ -290,11 +293,8 @@ export default function Home() {
           width: dimensions.width,
           height: dimensions.height,
           seed,
-          apiKey: config.pollinationsApiKey || undefined,
-          referenceImage: referenceImage || undefined,
-          provider: isGeminiImageModel(imageModel) ? "gemini" : "pollinations",
-          geminiApiKey: config.geminiApiKey || undefined,
-          platform: config.platform,
+          apiKey: config.leonardoApiKey || undefined,
+          referenceImages: referenceImages || undefined,
         }),
       });
       const data = await response.json();
@@ -315,8 +315,8 @@ export default function Home() {
     try {
       const results = await Promise.all(
         segments.map(async (segment, index) => {
-          const { prompt, isVariation } = getEffectivePrompt(index);
-          const imageUrl = await generateImageForSegment(segment, prompt);
+          const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
+          const imageUrl = await generateImageForSegment(segment, prompt, referenceImages);
           return { id: segment.id, imageUrl, isVariation };
         })
       );
@@ -346,10 +346,9 @@ export default function Home() {
     if (index === -1) return;
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt, isVariation } = getEffectivePrompt(index);
-    // Seed aléatoire pour éviter de regénérer une image identique et gaspiller des crédits
+    const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
     const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, seed);
+    const imageUrl = await generateImageForSegment(segment, prompt, referenceImages, seed);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
@@ -368,10 +367,10 @@ export default function Home() {
     if (index === -1) return;
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt: basePrompt } = getEffectivePrompt(index);
+    const { prompt: basePrompt, referenceImages } = getEffectivePrompt(index);
     const prompt = `${basePrompt}, slight variation, same composition, different angle`;
     const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, seed);
+    const imageUrl = await generateImageForSegment(segment, prompt, referenceImages, seed);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
@@ -597,10 +596,10 @@ export default function Home() {
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
           onSegmentPromptChange={handleSegmentPromptChange}
-          referenceImage={referenceImage}
-          onReferenceImageChange={handleReferenceImageUpload}
-          promptStyleSuffix={promptStyleSuffix}
-          onPromptStyleSuffixChange={setPromptStyleSuffix}
+          leonardoApiKey={config.leonardoApiKey}
+          selectedVisualStyleId={selectedVisualStyleId}
+          onSelectVisualStyle={handleSelectVisualStyle}
+          selectedVisualStyle={selectedVisualStyle}
           onProceed={handleProceedToVoice}
         />
       )}
