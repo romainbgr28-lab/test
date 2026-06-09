@@ -2,7 +2,7 @@
 
 import * as React from "react";
 import { Download, FileArchive, Loader2 } from "lucide-react";
-import type { VideoProject, PublishMetadata } from "@/types";
+import type { MistralModel, VideoProject, PublishMetadata } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { estimateCost, formatEur } from "@/lib/cost-calculator";
@@ -30,7 +30,9 @@ export function StepExport({ project, onExport, exporting, onGenerateMetadata, g
 
   const totalDuration = project.segments.reduce((sum, s) => sum + s.duration, 0);
   const cost = estimateCost({
-    mistralModel: project.mistralModel as never,
+    mistralModel: project.mistralModel as MistralModel,
+    imageModel: project.imageModel,
+    segmentCount: project.segments.length,
   });
 
   return (
@@ -47,7 +49,7 @@ export function StepExport({ project, onExport, exporting, onGenerateMetadata, g
           </div>
           <div className="rounded-md border border-border bg-secondary/40 p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Durée totale</p>
-            <p className="mt-1 text-2xl font-semibold">{totalDuration}s</p>
+            <p className="mt-1 text-2xl font-semibold">{totalDuration.toFixed(1)}s</p>
           </div>
           <div className="rounded-md border border-border bg-secondary/40 p-4">
             <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Coût estimé</p>
@@ -64,6 +66,11 @@ export function StepExport({ project, onExport, exporting, onGenerateMetadata, g
             <li>script_complet.txt — script avec timing cumulé</li>
             <li>image_01.png ... image_{String(project.segments.length).padStart(2, "0")}.png</li>
             <li>voiceover.mp3 — voix off complète</li>
+            <li>subtitles.srt + subtitles_capcut.txt — sous-titres (version éditée dans la timeline)</li>
+            <li>sync_report.txt — rapport de synchronisation détaillé (timings, débit, écart audio)</li>
+            {project.researchSources && project.researchSources.length > 0 && (
+              <li>sources_recherche.txt — sources web utilisées pour le script</li>
+            )}
             <li>guide_montage_capcut.txt — guide de montage généré par l&apos;IA</li>
             {project.publishMetadata && <li>legende_publication.txt — légende + hashtags</li>}
             <li>metadata.json — paramètres complets du projet</li>

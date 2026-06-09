@@ -69,6 +69,9 @@ export interface VideoProject {
   imageModel: string;
   viralityScore?: ViralityScore;
   publishMetadata?: PublishMetadata;
+  subtitles?: SubtitleEntry[];
+  researchSources?: string[];
+  audioDuration?: number;
   createdAt: string;
 }
 

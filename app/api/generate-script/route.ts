@@ -196,6 +196,7 @@ N'invente aucune donnée : tout doit provenir de tes recherches.`;
             }
             if (result.sources.length > 0) {
               send({ type: "status", message: `${result.sources.length} source(s) web consultée(s).` });
+              send({ type: "sources", sources: result.sources });
             }
           } catch (searchError) {
             console.error("Recherche web Mistral indisponible, repli sans recherche :", searchError);

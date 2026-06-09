@@ -2,17 +2,20 @@
 
 import * as React from "react";
 import { Play, Pause, SkipBack, Download, ArrowRight, Film, Loader2 } from "lucide-react";
-import type { VideoSegment, VideoRenderOptions, Platform } from "@/types";
+import type { VideoSegment, VideoRenderOptions, Platform, SubtitleEntry } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
-import { buildBeats, loadImages, drawFrame, getTotalDuration, generateSubtitles } from "@/lib/video-render";
+import { buildBeats, loadImages, drawFrame, getTotalDuration } from "@/lib/video-render";
+import { TimelineEditor } from "../ui/TimelineEditor";
 import { getDimensionsForPlatform } from "@/lib/pollinations";
 
 interface StepVideoProps {
   segments: VideoSegment[];
   voiceoverUrl?: string;
   platform: Platform;
+  subtitles: SubtitleEntry[];
+  onSubtitlesChange: (subtitles: SubtitleEntry[]) => void;
   onProceed: () => void;
 }
 
@@ -38,7 +41,7 @@ const DEFAULT_OPTIONS: VideoRenderOptions = {
 // Preview canvas display size (scaled down from full resolution)
 const PREVIEW_HEIGHT = 520;
 
-export function StepVideo({ segments, voiceoverUrl, platform, onProceed }: StepVideoProps) {
+export function StepVideo({ segments, voiceoverUrl, platform, subtitles, onSubtitlesChange, onProceed }: StepVideoProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const audioRef = React.useRef<HTMLAudioElement>(null);
   const rafRef = React.useRef<number>(0);
@@ -60,16 +63,26 @@ export function StepVideo({ segments, voiceoverUrl, platform, onProceed }: StepV
   // Shared state refs for RAF loop (avoids stale closure)
   const beatsRef = React.useRef(buildBeats(segments, options.beatDuration));
   const imagesRef = React.useRef<Map<string, HTMLImageElement>>(new Map());
-  const subtitlesRef = React.useRef(generateSubtitles(segments));
+  const subtitlesRef = React.useRef(subtitles);
   const optionsRef = React.useRef(options);
 
   React.useEffect(() => { optionsRef.current = options; }, [options]);
+
+  // Les sous-titres édités dans la timeline sont redessinés immédiatement
+  React.useEffect(() => {
+    subtitlesRef.current = subtitles;
+    const ctx = canvasRef.current?.getContext("2d");
+    if (ctx && ready) {
+      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, currentTime, subtitles, optionsRef.current);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtitles]);
 
   async function initPreview() {
     setLoading(true);
     setReady(false);
     beatsRef.current = buildBeats(segments, options.beatDuration);
-    subtitlesRef.current = generateSubtitles(segments);
+    subtitlesRef.current = subtitles;
     imagesRef.current = await loadImages(segments);
     setReady(true);
     setLoading(false);
@@ -91,7 +104,6 @@ export function StepVideo({ segments, voiceoverUrl, platform, onProceed }: StepV
   // Rebuild beats when beatDuration changes (don't reload images)
   React.useEffect(() => {
     beatsRef.current = buildBeats(segments, options.beatDuration);
-    subtitlesRef.current = generateSubtitles(segments);
   }, [options.beatDuration, segments]);
 
   // RAF animation loop
@@ -140,14 +152,16 @@ export function StepVideo({ segments, voiceoverUrl, platform, onProceed }: StepV
     if (playing) { audio.pause(); setPlaying(false); cancelAnimationFrame(rafRef.current); }
   }
 
-  function handleScrub(e: React.ChangeEvent<HTMLInputElement>) {
-    const t = Number(e.target.value);
+  function seekTo(t: number) {
     const audio = audioRef.current;
     if (audio) audio.currentTime = t;
     setCurrentTime(t);
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext("2d");
-    if (ctx) drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, options);
+    const ctx = canvasRef.current?.getContext("2d");
+    if (ctx) drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current);
+  }
+
+  function handleScrub(e: React.ChangeEvent<HTMLInputElement>) {
+    seekTo(Number(e.target.value));
   }
 
   async function handleRecord() {
@@ -277,6 +291,17 @@ export function StepVideo({ segments, voiceoverUrl, platform, onProceed }: StepV
             )}
           </div>
         </div>
+
+        {/* Timeline interactive : audio + images + sous-titres alignés */}
+        <TimelineEditor
+          segments={segments}
+          subtitles={subtitles}
+          duration={totalDuration}
+          currentTime={currentTime}
+          hasAudio={!!voiceoverUrl}
+          onSeek={seekTo}
+          onSubtitlesChange={onSubtitlesChange}
+        />
 
         {/* Options */}
         <div className="grid grid-cols-1 gap-4 rounded-lg border border-border bg-secondary/20 p-4 sm:grid-cols-3">

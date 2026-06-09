@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, Lightbulb, Loader2, Search, TrendingUp } from "lucide-react";
+import { CheckCircle2, ExternalLink, Lightbulb, Loader2, Search, TrendingUp } from "lucide-react";
 import type { ViralityScore, VideoSegment } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { SegmentCard } from "../ui/SegmentCard";
@@ -19,6 +19,7 @@ interface StepScriptProps {
   regeneratingSegmentId: string | null;
   onValidate: () => void;
   validated: boolean;
+  sources?: string[];
 }
 
 function scoreColor(score: number): string {
@@ -156,6 +157,7 @@ export function StepScript({
   regeneratingSegmentId,
   onValidate,
   validated,
+  sources = [],
 }: StepScriptProps) {
   const totalDuration = segments.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
 
@@ -244,6 +246,30 @@ export function StepScript({
               </div>
             </CardContent>
           </Card>
+        )}
+
+        {sources.length > 0 && (
+          <div className="flex flex-col gap-2 rounded-md border border-border bg-secondary/20 p-4">
+            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <Search className="h-3.5 w-3.5" />
+              Sources web utilisées pour le script ({sources.length})
+            </p>
+            <ul className="flex flex-col gap-1">
+              {sources.map((url, i) => (
+                <li key={i}>
+                  <a
+                    href={url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="inline-flex max-w-full items-center gap-1.5 truncate text-sm text-primary hover:underline"
+                  >
+                    <ExternalLink className="h-3 w-3 shrink-0" />
+                    <span className="truncate">{url}</span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
         )}
 
         <div className="flex items-center justify-between">

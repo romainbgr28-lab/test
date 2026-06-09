@@ -4,6 +4,7 @@ import * as React from "react";
 import { Wand2 } from "lucide-react";
 import type {
   ImageModel,
+  SubtitleEntry,
   Language,
   MistralModel,
   NicheProfile,
@@ -27,6 +28,7 @@ import { uid } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, buildSubSegmentPrompts, getDimensionsForPlatform } from "@/lib/pollinations";
 import { syncSegmentsToAudio } from "@/lib/sync";
+import { generateSubtitles } from "@/lib/subtitles";
 
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
@@ -58,7 +60,7 @@ export default function Home() {
   const { toast } = useToast();
 
   const [currentStep, setCurrentStep] = React.useState(0);
-  const [unlockedStep, setUnlockedStep] = React.useState(STEPS.length - 1);
+  const [unlockedStep, setUnlockedStep] = React.useState(0);
 
   const [config, setConfig] = React.useState<StepConfigState>({
     subject: "",
@@ -80,6 +82,7 @@ export default function Home() {
   const [segments, setSegments] = React.useState<VideoSegment[]>([]);
   const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
+  const [researchSources, setResearchSources] = React.useState<string[]>([]);
 
   const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
@@ -89,6 +92,7 @@ export default function Home() {
 
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
   const [audioDuration, setAudioDuration] = React.useState<number>(0);
+  const [subtitles, setSubtitles] = React.useState<SubtitleEntry[]>([]);
 
   const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
   const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
@@ -120,6 +124,7 @@ export default function Home() {
     setSegments([]);
     setScriptValidated(false);
     setScriptProgress([]);
+    setResearchSources([]);
     setUnlockedStep((u) => Math.max(u, 1));
     setCurrentStep(1);
     try {
@@ -165,10 +170,13 @@ export default function Home() {
             type: string;
             message?: string;
             score?: number;
+            sources?: string[];
             viralityScore?: ViralityScore;
             segments?: RawSegment[];
           };
-          if (event.type === "status" && event.message) {
+          if (event.type === "sources" && Array.isArray(event.sources)) {
+            setResearchSources(event.sources);
+          } else if (event.type === "status" && event.message) {
             setScriptProgress((prev) => [...prev, { message: event.message!, score: event.score }]);
           } else if (event.type === "result" && event.viralityScore && event.segments) {
             result = { viralityScore: event.viralityScore, segments: event.segments };
@@ -409,9 +417,10 @@ export default function Home() {
     setAudioDuration(duration);
     const synced = syncSegmentsToAudio(segments, duration);
     setSegments(synced);
+    setSubtitles(generateSubtitles(synced));
     toast({
       title: "Audio synchronisé",
-      description: `${synced.length} segments synchronisés sur ${duration.toFixed(1)}s`,
+      description: `${synced.length} segments synchronisés sur ${duration.toFixed(1)}s, sous-titres générés.`,
       variant: "success",
     });
   }
@@ -422,6 +431,10 @@ export default function Home() {
   }
 
   function handleProceedToPreview() {
+    // Sans audio uploadé, on génère quand même des sous-titres depuis le script
+    if (subtitles.length === 0 && segments.length > 0) {
+      setSubtitles(generateSubtitles(segments));
+    }
     setCurrentStep(4);
     setUnlockedStep((u) => Math.max(u, 4));
   }
@@ -472,6 +485,9 @@ export default function Home() {
       imageModel,
       viralityScore: viralityScore ?? undefined,
       publishMetadata: publishMetadata ?? undefined,
+      subtitles: subtitles.length > 0 ? subtitles : generateSubtitles(segments),
+      researchSources: researchSources.length > 0 ? researchSources : undefined,
+      audioDuration: audioDuration > 0 ? audioDuration : undefined,
       createdAt: new Date().toISOString(),
     };
     setProject(newProject);
@@ -551,6 +567,7 @@ export default function Home() {
           regeneratingSegmentId={regeneratingSegmentId}
           onValidate={handleValidateScript}
           validated={scriptValidated}
+          sources={researchSources}
         />
       )}
 
@@ -588,6 +605,8 @@ export default function Home() {
           segments={segments}
           voiceoverUrl={voiceoverUrl}
           platform={config.platform}
+          subtitles={subtitles}
+          onSubtitlesChange={setSubtitles}
           onProceed={handleProceedToExport}
         />
       )}

@@ -3,6 +3,7 @@ import JSZip from "jszip";
 import { callMistralChat } from "@/lib/mistral";
 import type { VideoProject } from "@/types";
 import { generateSubtitles, toSRT } from "@/lib/subtitles";
+import { buildSyncReport, normalizeSubtitles } from "@/lib/sync";
 
 export const runtime = "nodejs";
 
@@ -113,9 +114,9 @@ export async function POST(request: Request) {
     for (const segment of sortedSegments) {
       if (segment.imageBlob) {
         try {
-          const { buffer } = dataUrlToBuffer(segment.imageBlob);
+          const { buffer, extension } = dataUrlToBuffer(segment.imageBlob);
           const index = String(segment.order).padStart(2, "0");
-          zip.file(`image_${index}.png`, buffer);
+          zip.file(`image_${index}.${extension}`, buffer);
         } catch (err) {
           console.error(`Image du segment ${segment.order} ignorée :`, err);
         }
@@ -139,22 +140,48 @@ export async function POST(request: Request) {
       zip.file("legende_publication.txt", `${project.publishMetadata.caption}\n\n${hashtags}`.trim());
     }
 
-    const subtitles = generateSubtitles(sortedSegments);
+    // Sous-titres : on privilégie la version éditée manuellement dans la timeline
+    const subtitles =
+      project.subtitles && project.subtitles.length > 0
+        ? normalizeSubtitles(project.subtitles)
+        : generateSubtitles(sortedSegments);
     zip.file("subtitles.srt", toSRT(subtitles));
 
     const captionLines = subtitles.map(
-      (sub, i) => `Segment ${i + 1} : ${sub.start.toFixed(1)}s à ${sub.end.toFixed(1)}s - ${sub.text}`
+      (sub, i) => `Sous-titre ${i + 1} : ${sub.start.toFixed(1)}s à ${sub.end.toFixed(1)}s - ${sub.text}`
     );
     zip.file("subtitles_capcut.txt", captionLines.join("\n"));
 
-    const totalDurationReport = project.segments.reduce((sum, s) => sum + s.duration, 0);
-    const avgDuration = totalDurationReport / project.segments.length;
+    if (project.researchSources && project.researchSources.length > 0) {
+      zip.file(
+        "sources_recherche.txt",
+        ["Sources web utilisées pour le script :", "", ...project.researchSources].join("\n")
+      );
+    }
+
+    const totalSegmentsDuration = project.segments.reduce((sum, s) => sum + s.duration, 0);
+    const report = buildSyncReport(project.segments, project.audioDuration ?? totalSegmentsDuration);
     const syncReportLines = [
-      `Durée audio : ${totalDurationReport.toFixed(1)}s`,
-      `Nombre de segments : ${project.segments.length}`,
-      `Durée moyenne par segment : ${avgDuration.toFixed(1)}s`,
-      "Segments :",
-      ...subtitles.map((sub, i) => `${i + 1}. [${sub.start.toFixed(1)}s - ${sub.end.toFixed(1)}s] : ${sub.text.slice(0, 60)}${sub.text.length > 60 ? "..." : ""}`),
+      "=== RAPPORT DE SYNCHRONISATION ===",
+      "",
+      `Durée audio détectée : ${report.audioDuration.toFixed(1)}s`,
+      `Durée totale des segments : ${report.totalSegmentsDuration.toFixed(1)}s`,
+      `Écart segments / audio : ${report.driftSeconds.toFixed(2)}s`,
+      `Nombre de segments : ${report.segmentCount}`,
+      `Durée moyenne par segment : ${report.averageSegmentDuration.toFixed(1)}s`,
+      `Nombre de sous-titres : ${subtitles.length}`,
+      "",
+      "Segments (timing, mots, débit) :",
+      ...report.entries.map(
+        (e) =>
+          `  ${e.order}. [${e.start.toFixed(1)}s → ${e.end.toFixed(1)}s] ${e.duration.toFixed(1)}s — ${e.wordCount} mots (${e.wordsPerSecond.toFixed(1)} mots/s)`
+      ),
+      "",
+      "Sous-titres :",
+      ...subtitles.map(
+        (sub, i) =>
+          `  ${i + 1}. [${sub.start.toFixed(1)}s → ${sub.end.toFixed(1)}s] ${sub.text.slice(0, 60)}${sub.text.length > 60 ? "..." : ""}`
+      ),
     ];
     zip.file("sync_report.txt", syncReportLines.join("\n"));
 

@@ -5,6 +5,7 @@ import { Upload, ArrowRight, Music } from "lucide-react";
 import type { VideoSegment } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
+import { fileToDataUrl } from "@/lib/utils";
 
 interface StepVoiceProps {
   segments: VideoSegment[];
@@ -18,11 +19,30 @@ export function StepVoice({ segments, voiceoverUrl, audioDuration, onAudioLoaded
   const [dragging, setDragging] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
-  function handleFile(file: File) {
-    if (!file.type.match(/audio\/(mpeg|wav|mp3|x-wav|ogg)/)) return;
-    const url = URL.createObjectURL(file);
-    const audio = new Audio(url);
-    audio.onloadedmetadata = () => onAudioLoaded(url, audio.duration);
+  const [error, setError] = React.useState<string | null>(null);
+
+  // L'audio est converti en data URL (et non en blob URL) pour pouvoir être
+  // embarqué tel quel dans le ZIP d'export côté serveur.
+  async function handleFile(file: File) {
+    if (!file.type.startsWith("audio/")) {
+      setError("Format non supporté : choisis un fichier audio (MP3, WAV, OGG, M4A).");
+      return;
+    }
+    setError(null);
+    try {
+      const dataUrl = await fileToDataUrl(file);
+      const audio = new Audio(dataUrl);
+      audio.onloadedmetadata = () => {
+        if (!Number.isFinite(audio.duration) || audio.duration <= 0) {
+          setError("Impossible de lire la durée de ce fichier audio.");
+          return;
+        }
+        onAudioLoaded(dataUrl, audio.duration);
+      };
+      audio.onerror = () => setError("Impossible de décoder ce fichier audio.");
+    } catch {
+      setError("Échec de la lecture du fichier audio.");
+    }
   }
 
   function handleDrop(e: React.DragEvent) {
@@ -72,11 +92,13 @@ export function StepVoice({ segments, voiceoverUrl, audioDuration, onAudioLoaded
               <input
                 ref={inputRef}
                 type="file"
-                accept="audio/mpeg,audio/wav,audio/mp3,audio/ogg"
+                accept="audio/*"
                 className="hidden"
                 onChange={(e) => { const f = e.target.files?.[0]; if (f) handleFile(f); }}
               />
             </div>
+
+            {error && <p className="text-sm text-red-400">{error}</p>}
 
             {voiceoverUrl && (
               <div className="flex flex-col gap-2">
