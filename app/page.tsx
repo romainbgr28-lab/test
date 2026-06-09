@@ -8,26 +8,25 @@ import type {
   MistralModel,
   NicheProfile,
   Platform,
+  PublishMetadata,
   VideoProject,
+  VideoRenderOptions,
   VideoSegment,
   ViralityScore,
-  VisualStyle,
   VoiceId,
-  PublishMetadata,
-  VideoRenderOptions,
 } from "@/types";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
 import { StepScript } from "./components/steps/StepScript";
-import { StepImages } from "./components/steps/StepImages";
+import { StepImages, isGeminiImageModel } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
 import { StepVideo } from "./components/steps/StepVideo";
 import { StepExport } from "./components/steps/StepExport";
 import { renderVideo } from "@/lib/video-render";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
-import { estimateCost, formatCredits, formatEur } from "@/lib/cost-calculator";
+import { estimateCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
 
 const STEPS: StepDefinition[] = [
@@ -64,7 +63,6 @@ export default function Home() {
 
   const [config, setConfig] = React.useState<StepConfigState>({
     subject: "",
-    sourceContent: "",
     profile: null,
     platform: "tiktok",
     duration: 60,
@@ -72,7 +70,7 @@ export default function Home() {
     mistralModel: "mistral-small-latest",
     mistralApiKey: "",
     pollinationsApiKey: "",
-    leonardoApiKey: "",
+    geminiApiKey: "",
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
@@ -82,12 +80,11 @@ export default function Home() {
   const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
 
-  const [imageModel, setImageModel] = React.useState<ImageModel>("");
+  const [imageModel, setImageModel] = React.useState<ImageModel>("flux");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
-  const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
-  const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
-  const [leonardoCreditsUsed, setLeonardoCreditsUsed] = React.useState(0);
+  const [referenceImage, setReferenceImage] = React.useState<string | undefined>(undefined);
+  const [promptStyleSuffix, setPromptStyleSuffix] = React.useState("");
 
   const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
@@ -103,14 +100,18 @@ export default function Home() {
   const [musicName, setMusicName] = React.useState<string | undefined>(undefined);
   const [videoResult, setVideoResult] = React.useState<{ url: string; extension: "mp4" | "webm" } | undefined>(undefined);
   const [rendering, setRendering] = React.useState(false);
-  const [renderProgress, setRenderProgress] = React.useState<{ ratio: number; label: string }>({ ratio: 0, label: "" });
+  const [renderProgress, setRenderProgress] = React.useState({ ratio: 0, label: "" });
   const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
   const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
 
   const [project, setProject] = React.useState<VideoProject | null>(null);
   const [exporting, setExporting] = React.useState(false);
 
-  const cost = estimateCost({ mistralModel: config.mistralModel });
+  const cost = estimateCost({
+    mistralModel: config.mistralModel,
+    imageModel,
+    segmentCount: segments.length || 0,
+  });
 
   function updateConfig(patch: Partial<StepConfigState>) {
     setConfig((prev) => ({ ...prev, ...patch }));
@@ -135,11 +136,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           subject: config.subject,
-          sourceContent: config.sourceContent || undefined,
           platform: config.platform,
           language: config.language,
-          scriptInstructions: config.profile.scriptInstructions,
-          viralityInstructions: config.profile.viralityInstructions,
+          nicheInstructions: config.profile.instructions,
           duration: config.duration,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
@@ -212,8 +211,7 @@ export default function Home() {
           subject: config.subject,
           platform: config.platform,
           language: config.language,
-          scriptInstructions: config.profile.scriptInstructions,
-          viralityInstructions: config.profile.viralityInstructions,
+          nicheInstructions: config.profile.instructions,
           duration: config.duration,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
@@ -256,8 +254,7 @@ export default function Home() {
     const segment = segments[index];
     const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
     const base = segment.imagePrompt?.trim() || suggested;
-    const stylePrompt = selectedVisualStyle?.stylePrompt.trim();
-    const prompt = stylePrompt ? `${base}, ${stylePrompt}` : base;
+    const prompt = promptStyleSuffix.trim() ? `${base}, ${promptStyleSuffix.trim()}` : base;
     return { prompt, isVariation };
   }
 
@@ -265,21 +262,24 @@ export default function Home() {
     setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
   }
 
-  function handleSelectVisualStyle(style: VisualStyle | null) {
-    setSelectedVisualStyle(style);
-    setSelectedVisualStyleId(style?.id ?? null);
+  function handleReferenceImageUpload(file: File | null) {
+    if (!file) {
+      setReferenceImage(undefined);
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => setReferenceImage(reader.result as string);
+    reader.readAsDataURL(file);
   }
 
   async function generateImageForSegment(
     segment: VideoSegment,
-    promptOverride: string
+    promptOverride: string,
+    seedOverride?: number
   ): Promise<string | null> {
     if (!config.profile) return null;
-    if (!imageModel) {
-      toast({ title: "Choisis un modèle Leonardo", description: "Sélectionne un modèle d'image avant de générer.", variant: "error" });
-      return null;
-    }
     const dimensions = getDimensionsForPlatform(config.platform);
+    const seed = seedOverride ?? segment.order * 1000;
     try {
       const response = await fetch("/api/generate-image", {
         method: "POST",
@@ -289,19 +289,17 @@ export default function Home() {
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
-          apiKey: config.leonardoApiKey || undefined,
-          referenceImages:
-            selectedVisualStyle && selectedVisualStyle.referenceImages.length > 0
-              ? selectedVisualStyle.referenceImages
-              : undefined,
+          seed,
+          apiKey: config.pollinationsApiKey || undefined,
+          referenceImage: referenceImage || undefined,
+          provider: isGeminiImageModel(imageModel) ? "gemini" : "pollinations",
+          geminiApiKey: config.geminiApiKey || undefined,
+          platform: config.platform,
         }),
       });
       const data = await response.json();
       if (!response.ok) {
         throw new Error(data?.error ?? "Erreur lors de la génération de l'image.");
-      }
-      if (typeof data.apiCreditCost === "number") {
-        setLeonardoCreditsUsed((prev) => prev + data.apiCreditCost);
       }
       return data.imageUrl as string;
     } catch (error) {
@@ -349,7 +347,9 @@ export default function Home() {
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
     const { prompt, isVariation } = getEffectivePrompt(index);
-    const imageUrl = await generateImageForSegment(segment, prompt);
+    // Seed aléatoire pour éviter de regénérer une image identique et gaspiller des crédits
+    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
+    const imageUrl = await generateImageForSegment(segment, prompt, seed);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
@@ -370,7 +370,8 @@ export default function Home() {
     setImageLoadingIds((prev) => new Set(prev).add(id));
     const { prompt: basePrompt } = getEffectivePrompt(index);
     const prompt = `${basePrompt}, slight variation, same composition, different angle`;
-    const imageUrl = await generateImageForSegment(segment, prompt);
+    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
+    const imageUrl = await generateImageForSegment(segment, prompt, seed);
     if (imageUrl) {
       setSegments((prev) =>
         prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
@@ -429,22 +430,19 @@ export default function Home() {
     if (renderOptions.musicUrl) URL.revokeObjectURL(renderOptions.musicUrl);
     if (!file) {
       setMusicName(undefined);
-      handleRenderOptionsChange({ musicUrl: undefined });
+      setRenderOptions((prev) => ({ ...prev, musicUrl: undefined }));
       return;
     }
+    const url = URL.createObjectURL(file);
     setMusicName(file.name);
-    handleRenderOptionsChange({ musicUrl: URL.createObjectURL(file) });
+    setRenderOptions((prev) => ({ ...prev, musicUrl: url }));
   }
 
   async function handleRenderVideo() {
-    if (!segments.every((s) => !!s.imageUrl)) {
-      toast({ title: "Images manquantes", description: "Génère toutes les images avant de monter la vidéo.", variant: "error" });
-      return;
-    }
     setRendering(true);
-    setRenderProgress({ ratio: 0, label: "Préparation..." });
+    setRenderProgress({ ratio: 0, label: "Initialisation..." });
     try {
-      if (videoResult) URL.revokeObjectURL(videoResult.url);
+      if (videoResult?.url) URL.revokeObjectURL(videoResult.url);
       const result = await renderVideo({
         segments,
         voiceoverUrl,
@@ -454,14 +452,10 @@ export default function Home() {
       });
       const url = URL.createObjectURL(result.blob);
       setVideoResult({ url, extension: result.extension });
-      toast({
-        title: "Vidéo générée !",
-        description: result.extension === "mp4" ? "Ta vidéo MP4 est prête." : "Vidéo WebM prête (conversion MP4 indisponible).",
-        variant: "success",
-      });
+      toast({ title: "Vidéo générée !", description: `Fichier ${result.extension.toUpperCase()} prêt au téléchargement.`, variant: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: "Échec du montage vidéo", description: message, variant: "error" });
+      toast({ title: "Échec du rendu vidéo", description: message, variant: "error" });
     } finally {
       setRendering(false);
     }
@@ -488,11 +482,9 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error ?? "Erreur lors de la génération des métadonnées.");
-      }
-      setPublishMetadata({ caption: data.caption ?? "", hashtags: data.hashtags ?? [] });
-      toast({ title: "Légende & hashtags générés !", variant: "success" });
+      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des métadonnées.");
+      setPublishMetadata(data as PublishMetadata);
+      toast({ title: "Légende générée !", variant: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
       toast({ title: "Échec de la génération", description: message, variant: "error" });
@@ -514,7 +506,7 @@ export default function Home() {
       mistralModel: config.mistralModel,
       imageModel,
       viralityScore: viralityScore ?? undefined,
-      publishMetadata,
+      publishMetadata: publishMetadata ?? undefined,
       createdAt: new Date().toISOString(),
     };
     setProject(newProject);
@@ -566,10 +558,10 @@ export default function Home() {
           </div>
         </div>
         <div className="flex flex-col items-end gap-1">
-          <span className="text-xs uppercase tracking-wide text-muted-foreground">Coûts</span>
+          <span className="text-xs uppercase tracking-wide text-muted-foreground">Coût estimé total</span>
           <div className="flex gap-2">
-            <CostBadge label={`Script ~${formatEur(cost.scriptEur)}`} />
-            <CostBadge label={formatCredits(leonardoCreditsUsed)} />
+            <CostBadge label={formatPollen(cost.totalPollen)} />
+            <CostBadge label={formatEur(cost.totalEur)} />
           </div>
         </div>
       </header>
@@ -605,10 +597,10 @@ export default function Home() {
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
           onSegmentPromptChange={handleSegmentPromptChange}
-          leonardoApiKey={config.leonardoApiKey}
-          selectedVisualStyleId={selectedVisualStyleId}
-          onSelectVisualStyle={handleSelectVisualStyle}
-          selectedVisualStyle={selectedVisualStyle}
+          referenceImage={referenceImage}
+          onReferenceImageChange={handleReferenceImageUpload}
+          promptStyleSuffix={promptStyleSuffix}
+          onPromptStyleSuffixChange={setPromptStyleSuffix}
           onProceed={handleProceedToVoice}
         />
       )}

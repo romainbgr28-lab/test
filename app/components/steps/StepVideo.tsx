@@ -211,14 +211,14 @@ export function StepVideo({
           <CardHeader>
             <CardTitle className="flex items-center gap-2 text-base">
               <Hash className="h-4 w-4" />
-              Légende & hashtags
+              Légende &amp; hashtags
             </CardTitle>
             <CardDescription>Génère une légende accrocheuse et des hashtags pertinents pour la publication.</CardDescription>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
             <Button variant="outline" size="sm" className="w-fit" onClick={onGenerateMetadata} disabled={generatingMetadata}>
               {generatingMetadata ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Générer légende & hashtags
+              Générer légende &amp; hashtags
             </Button>
             {publishMetadata && (
               <div className="flex flex-col gap-2 rounded-md border border-border bg-background/50 p-3">

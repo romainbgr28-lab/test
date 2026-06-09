@@ -14,7 +14,6 @@ export interface RenderResult {
   extension: "mp4" | "webm";
 }
 
-// Résolution de rendu (réduite vs l'export image pour permettre un encodage temps réel fluide).
 function renderDimensions(platform: Platform): { width: number; height: number } {
   if (platform === "youtube") return { width: 1280, height: 720 };
   return { width: 720, height: 1280 };
@@ -36,7 +35,6 @@ async function fetchArrayBuffer(url: string): Promise<ArrayBuffer> {
   return res.arrayBuffer();
 }
 
-// Dessine une image en mode "cover" (remplit le cadre sans déformation), avec un facteur de zoom additionnel.
 function drawCover(
   ctx: CanvasRenderingContext2D,
   img: HTMLImageElement,
@@ -78,8 +76,6 @@ interface CaptionSegment {
   end: number;
 }
 
-// Découpe chaque segment en mots avec un timing réparti uniformément sur sa durée
-// (pas de timestamps ASR disponibles, on estime à partir de la durée du segment).
 function buildCaptions(segments: VideoSegment[]): CaptionSegment[] {
   const ordered = [...segments].sort((a, b) => a.order - b.order);
   const result: CaptionSegment[] = [];
@@ -108,6 +104,16 @@ function wrapWords(words: string[], maxPerLine: number): string[][] {
   return lines;
 }
 
+function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
 function drawSubtitles(
   ctx: CanvasRenderingContext2D,
   caption: CaptionSegment,
@@ -126,7 +132,6 @@ function drawSubtitles(
   const activeIndex = caption.words.findIndex((word) => t >= word.start && t < word.end);
   const currentIndex = activeIndex === -1 ? (t >= caption.end ? caption.words.length - 1 : 0) : activeIndex;
 
-  // Fenêtre de mots affichés autour du mot courant (style sous-titres TikTok).
   const maxPerLine = 4;
   const lines = wrapWords(
     caption.words.map((word) => word.text),
@@ -168,16 +173,6 @@ function drawSubtitles(
   }
 }
 
-function roundRect(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number) {
-  ctx.beginPath();
-  ctx.moveTo(x + r, y);
-  ctx.arcTo(x + w, y, x + w, y + h, r);
-  ctx.arcTo(x + w, y + h, x, y + h, r);
-  ctx.arcTo(x, y + h, x, y, r);
-  ctx.arcTo(x, y, x + w, y, r);
-  ctx.closePath();
-}
-
 function pickMimeType(): string {
   const candidates = [
     "video/webm;codecs=vp9,opus",
@@ -203,18 +198,12 @@ async function convertWebmToMp4(webm: Blob, onProgress?: (ratio: number, label: 
     });
     await ffmpeg.writeFile("input.webm", await fetchFile(webm));
     await ffmpeg.exec([
-      "-i",
-      "input.webm",
-      "-c:v",
-      "libx264",
-      "-pix_fmt",
-      "yuv420p",
-      "-preset",
-      "veryfast",
-      "-c:a",
-      "aac",
-      "-b:a",
-      "192k",
+      "-i", "input.webm",
+      "-c:v", "libx264",
+      "-pix_fmt", "yuv420p",
+      "-preset", "veryfast",
+      "-c:a", "aac",
+      "-b:a", "192k",
       "output.mp4",
     ]);
     const data = await ffmpeg.readFile("output.mp4");
@@ -249,7 +238,6 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
 
   const captions = buildCaptions(ordered);
 
-  // Audio : on route voix off + musique dans un MediaStreamDestination pour l'inclure dans l'enregistrement.
   const AudioCtx: typeof AudioContext =
     (window as unknown as { AudioContext: typeof AudioContext; webkitAudioContext?: typeof AudioContext }).AudioContext ||
     (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
@@ -300,7 +288,6 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
     recorder.onstop = () => resolve(new Blob(chunks, { type: mimeType }));
   });
 
-  // Horloge maîtresse basée sur l'AudioContext pour garder l'image synchronisée avec le son.
   const startAt = audioContext.currentTime + 0.1;
   for (const source of audioSources) source.start(startAt);
   recorder.start();
@@ -313,7 +300,6 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
       ctx.fillStyle = "#000000";
       ctx.fillRect(0, 0, width, height);
 
-      // Détermine le segment courant.
       let acc = 0;
       let index = 0;
       for (let i = 0; i < ordered.length; i++) {
@@ -334,7 +320,6 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
       const panY = options.kenBurns ? (localProgress - 0.5) * height * 0.04 : 0;
       drawCover(ctx, images[index], width, height, zoom, panX, panY, 1);
 
-      // Transition (fondu) vers le segment suivant en fin de segment.
       if (transitionDuration > 0 && index < ordered.length - 1) {
         const intoTransition = localT - (segDuration - transitionDuration);
         if (intoTransition > 0) {
@@ -363,7 +348,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
     try {
       source.stop();
     } catch {
-      // déjà arrêtée
+      // already stopped
     }
   }
   const webmBlob = await recordingDone;
