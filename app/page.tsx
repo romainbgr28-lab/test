@@ -255,7 +255,7 @@ export default function Home() {
     toast({ title: "Script validé", description: "Passe à la génération des assets.", variant: "success" });
   }
 
-  function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean } {
+  function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean; referenceImages?: string[] } {
     const segment = segments[index];
     const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
     const base = segment.imagePrompt?.trim() || suggested;
