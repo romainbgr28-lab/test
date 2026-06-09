@@ -60,7 +60,7 @@ export default function Home() {
   const { toast } = useToast();
 
   const [currentStep, setCurrentStep] = React.useState(0);
-  const [unlockedStep, setUnlockedStep] = React.useState(0);
+  const [unlockedStep, setUnlockedStep] = React.useState(STEPS.length - 1);
 
   const [config, setConfig] = React.useState<StepConfigState>({
     subject: "",
