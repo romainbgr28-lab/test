@@ -70,21 +70,6 @@ export interface VideoProject {
   createdAt: string;
 }
 
-export interface PublishMetadata {
-  caption: string;
-  hashtags: string[];
-}
-
-export type SubtitleStyle = "karaoke" | "block" | "none";
-
-export interface VideoRenderOptions {
-  kenBurns: boolean;
-  transitions: boolean;
-  subtitleStyle: SubtitleStyle;
-  musicUrl?: string;
-  musicVolume: number;
-}
-
 export type MistralModel = "mistral-small-latest" | "mistral-large-latest";
 
 export type ImageModel = string;
