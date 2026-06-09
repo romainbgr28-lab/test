@@ -1,8 +1,8 @@
 "use client";
 
 import * as React from "react";
-import { CheckCircle2, ExternalLink, Lightbulb, Loader2, Search, TrendingUp } from "lucide-react";
-import type { ViralityScore, VideoSegment } from "@/types";
+import { AlertTriangle, CheckCircle2, ExternalLink, Lightbulb, Loader2, Search, TrendingUp, Zap } from "lucide-react";
+import type { HookVariant, ViralityScore, VideoSegment } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { SegmentCard } from "../ui/SegmentCard";
 import { Button } from "../ui/Button";
@@ -20,6 +20,11 @@ interface StepScriptProps {
   onValidate: () => void;
   validated: boolean;
   sources?: string[];
+  targetDuration: number;
+  hookVariants: HookVariant[];
+  generatingHooks: boolean;
+  onGenerateHooks: () => void;
+  onApplyHook: (narration: string) => void;
 }
 
 function scoreColor(score: number): string {
@@ -158,6 +163,11 @@ export function StepScript({
   onValidate,
   validated,
   sources = [],
+  targetDuration,
+  hookVariants,
+  generatingHooks,
+  onGenerateHooks,
+  onApplyHook,
 }: StepScriptProps) {
   const totalDuration = segments.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
 
@@ -271,6 +281,49 @@ export function StepScript({
             </ul>
           </div>
         )}
+
+        {/* Garde-fou durée : YouTube Shorts coupe à 60s, TikTok pénalise les vidéos non finies */}
+        {targetDuration > 0 && Math.abs(totalDuration - targetDuration) > targetDuration * 0.1 && (
+          <div className="flex items-start gap-2 rounded-md border border-amber-700/40 bg-amber-500/10 p-3 text-sm text-amber-200">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <span>
+              Le script fait {totalDuration}s pour une cible de {targetDuration}s.
+              {totalDuration > targetDuration
+                ? " Au-delà de 60s, YouTube Shorts coupe la vidéo et la rétention chute : raccourcis ou régénère des segments."
+                : " Trop court : ajoute du contenu pour exploiter toute la durée monétisable."}
+            </span>
+          </div>
+        )}
+
+        {/* A/B testing du hook : les 3 premières secondes décident de la rétention */}
+        <div className="flex flex-col gap-2 rounded-md border border-border bg-secondary/20 p-4">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+              <Zap className="h-3.5 w-3.5" />
+              Hook (3 premières secondes) — teste des variantes
+            </p>
+            <Button variant="outline" size="sm" onClick={onGenerateHooks} disabled={generatingHooks || segments.length === 0}>
+              {generatingHooks ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
+              Générer 3 hooks alternatifs
+            </Button>
+          </div>
+          {hookVariants.length > 0 && (
+            <div className="flex flex-col gap-2">
+              {hookVariants.map((variant, i) => (
+                <button
+                  key={i}
+                  type="button"
+                  onClick={() => onApplyHook(variant.narration)}
+                  className="flex flex-col gap-0.5 rounded-md border border-border bg-card p-3 text-left transition-colors hover:border-primary/60"
+                >
+                  <span className="text-sm">« {variant.narration} »</span>
+                  {variant.style && <span className="text-xs text-muted-foreground">Mécanique : {variant.style}</span>}
+                </button>
+              ))}
+              <p className="text-xs text-muted-foreground">Clique sur une variante pour remplacer le hook du segment 1.</p>
+            </div>
+          )}
+        </div>
 
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold">Segments du script</h3>

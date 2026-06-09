@@ -135,9 +135,21 @@ export async function POST(request: Request) {
     const montageGuide = await buildMontageGuide(project, apiKey);
     zip.file("guide_montage_capcut.txt", montageGuide);
 
-    if (project.publishMetadata && (project.publishMetadata.caption || project.publishMetadata.hashtags.length > 0)) {
-      const hashtags = project.publishMetadata.hashtags.map((h) => `#${h}`).join(" ");
-      zip.file("legende_publication.txt", `${project.publishMetadata.caption}\n\n${hashtags}`.trim());
+    const meta = project.publishMetadata;
+    if (meta && (meta.caption || meta.hashtags.length > 0 || meta.title)) {
+      const packLines = [
+        "=== PACK DE PUBLICATION ===",
+        "",
+        ...(meta.title ? [`TITRE YOUTUBE :`, meta.title, ""] : []),
+        ...(meta.description ? [`DESCRIPTION YOUTUBE :`, meta.description, ""] : []),
+        ...(meta.caption ? [`LÉGENDE TIKTOK / REELS :`, meta.caption, ""] : []),
+        ...(meta.hashtags.length > 0 ? [`HASHTAGS :`, meta.hashtags.map((h) => `#${h}`).join(" "), ""] : []),
+        ...(meta.bestPostTime ? [`MEILLEUR CRÉNEAU DE PUBLICATION :`, meta.bestPostTime, ""] : []),
+        ...(meta.nextVideoIdeas && meta.nextVideoIdeas.length > 0
+          ? ["PROCHAINES VIDÉOS DE LA SÉRIE :", ...meta.nextVideoIdeas.map((idea, i) => `${i + 1}. ${idea}`), ""]
+          : []),
+      ];
+      zip.file("pack_publication.txt", packLines.join("\n").trim());
     }
 
     // Sous-titres : on privilégie la version éditée manuellement dans la timeline

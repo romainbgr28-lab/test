@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Wand2 } from "lucide-react";
 import type {
+  HookVariant,
   ImageModel,
   SubtitleEntry,
   Language,
@@ -83,6 +84,8 @@ export default function Home() {
   const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
   const [researchSources, setResearchSources] = React.useState<string[]>([]);
+  const [hookVariants, setHookVariants] = React.useState<HookVariant[]>([]);
+  const [generatingHooks, setGeneratingHooks] = React.useState(false);
 
   const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
@@ -125,6 +128,7 @@ export default function Home() {
     setScriptValidated(false);
     setScriptProgress([]);
     setResearchSources([]);
+    setHookVariants([]);
     setUnlockedStep((u) => Math.max(u, 1));
     setCurrentStep(1);
     try {
@@ -248,6 +252,42 @@ export default function Home() {
     } finally {
       setRegeneratingSegmentId(null);
     }
+  }
+
+  async function handleGenerateHooks() {
+    const hookSegment = [...segments].sort((a, b) => a.order - b.order)[0];
+    if (!hookSegment) return;
+    setGeneratingHooks(true);
+    try {
+      const response = await fetch("/api/generate-hooks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          subject: config.subject,
+          currentHook: hookSegment.narration,
+          platform: config.platform,
+          language: config.language,
+          model: config.mistralModel,
+          apiKey: config.mistralApiKey || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des hooks.");
+      setHookVariants(data.variants as HookVariant[]);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec de la génération des hooks", description: message, variant: "error" });
+    } finally {
+      setGeneratingHooks(false);
+    }
+  }
+
+  function handleApplyHook(narration: string) {
+    const hookSegment = [...segments].sort((a, b) => a.order - b.order)[0];
+    if (!hookSegment) return;
+    handleSegmentChange(hookSegment.id, { narration });
+    setHookVariants([]);
+    toast({ title: "Hook remplacé", description: "Le segment 1 utilise la nouvelle accroche.", variant: "success" });
   }
 
   function handleValidateScript() {
@@ -568,6 +608,11 @@ export default function Home() {
           onValidate={handleValidateScript}
           validated={scriptValidated}
           sources={researchSources}
+          targetDuration={config.duration}
+          hookVariants={hookVariants}
+          generatingHooks={generatingHooks}
+          onGenerateHooks={handleGenerateHooks}
+          onApplyHook={handleApplyHook}
         />
       )}
 

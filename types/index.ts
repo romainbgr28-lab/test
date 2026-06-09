@@ -44,6 +44,23 @@ export interface ViralityScore {
 export interface PublishMetadata {
   caption: string;
   hashtags: string[];
+  title?: string;
+  description?: string;
+  bestPostTime?: string;
+  nextVideoIdeas?: string[];
+}
+
+export interface VideoIdea {
+  title: string;
+  hook: string;
+  angle: string;
+  monetizationPotential: string;
+  trendScore: number;
+}
+
+export interface HookVariant {
+  narration: string;
+  style: string;
 }
 
 export type SubtitleStyle = "karaoke" | "block" | "bottom" | "none";
