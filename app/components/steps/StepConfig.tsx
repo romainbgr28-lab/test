@@ -50,9 +50,10 @@ export interface StepConfigState {
   mistralApiKey: string;
   pollinationsApiKey: string;
   leonardoApiKey: string;
+  googleTtsKey: string;
 }
 
-type ApiKeyField = "mistralApiKey" | "pollinationsApiKey" | "leonardoApiKey";
+type ApiKeyField = "mistralApiKey" | "pollinationsApiKey" | "leonardoApiKey" | "googleTtsKey";
 
 const API_KEYS_STORAGE_KEY = "studioai:apiKeys";
 
@@ -174,25 +175,24 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
             />
           </div>
           <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Clé API Pollinations (voix off)</label>
+            <label className="text-sm font-medium text-foreground">Clé API Google Cloud TTS</label>
             <Input
               type="password"
-              value={state.pollinationsApiKey}
-              onChange={(e) => updateApiKey({ pollinationsApiKey: e.target.value })}
-              placeholder="pk_... ou sk_... — laisse vide pour utiliser la clé du serveur"
+              value={state.googleTtsKey ?? ""}
+              onChange={(e) => updateApiKey({ googleTtsKey: e.target.value })}
+              placeholder="AIza..."
               autoComplete="off"
             />
             <p className="text-xs text-muted-foreground">
-              Nécessaire pour générer la voix off (synthèse vocale). Crée une clé sur{" "}
+              Gratuit jusqu&apos;à 1 million de caractères/mois.{" "}
               <a
-                href="https://enter.pollinations.ai"
+                href="https://console.cloud.google.com/apis/credentials"
                 target="_blank"
-                rel="noreferrer"
+                rel="noopener noreferrer"
                 className="underline"
               >
-                enter.pollinations.ai
+                Créer une clé API
               </a>
-              .
             </p>
           </div>
           <div className="flex flex-col gap-1.5">

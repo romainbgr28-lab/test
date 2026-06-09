@@ -1,71 +1,35 @@
-import { NextResponse } from "next/server";
-import { TTS_ENDPOINT } from "@/lib/pollinations";
-import type { VoiceId } from "@/types";
+import { NextRequest, NextResponse } from "next/server";
+import { synthesizeSpeech } from "@/lib/google-tts";
 
 export const runtime = "nodejs";
 
-export async function POST(request: Request) {
+export async function POST(req: NextRequest) {
   try {
-    const body = await request.json();
-    const { text, voice, apiKey } = body as { text: string; voice: VoiceId; apiKey?: string };
+    const { text, voice, apiKey, language } = await req.json();
 
-    if (!text || !voice) {
-      return NextResponse.json({ error: "Paramètres manquants pour générer la voix off." }, { status: 400 });
-    }
-
-    const key = apiKey || process.env.POLLINATIONS_API_KEY;
-    if (!key) {
+    if (!text || !voice || !apiKey) {
       return NextResponse.json(
-        {
-          error:
-            "L'API Pollinations nécessite désormais une clé API (pk_ ou sk_) pour toutes les générations. Récupère ta clé sur enter.pollinations.ai et renseigne-la dans la configuration.",
-        },
-        { status: 401 }
+        { error: "Paramètres manquants : text, voice et apiKey sont requis." },
+        { status: 400 }
       );
     }
-    const headers: Record<string, string> = {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${key}`,
-    };
 
-    const requestBody = JSON.stringify({
-      model: "openai-audio",
+    const audioBuffer = await synthesizeSpeech(
+      text,
       voice,
-      messages: [{ role: "user", content: text }],
-    });
-
-    let response: Response | null = null;
-    const maxAttempts = 4;
-    for (let attempt = 0; attempt < maxAttempts; attempt++) {
-      if (attempt > 0) {
-        await new Promise((r) => setTimeout(r, 1000 * attempt));
-      }
-      response = await fetch(TTS_ENDPOINT, { method: "POST", headers, body: requestBody });
-      if (response.status !== 429) break;
-    }
-    if (!response) throw new Error("Aucune réponse du service TTS.");
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      const hint = response.status === 429
-        ? " Le service est saturé, réessaie dans quelques secondes."
-        : "";
-      return NextResponse.json(
-        { error: `Le service de voix off a renvoyé une erreur (${response.status}).${hint}`, details: errorText },
-        { status: 502 }
-      );
-    }
-
-    const arrayBuffer = await response.arrayBuffer();
-    const base64 = Buffer.from(arrayBuffer).toString("base64");
-
-    return NextResponse.json({ audioUrl: `data:audio/mpeg;base64,${base64}` });
-  } catch (error) {
-    console.error("Erreur /api/generate-voice :", error);
-    const message = error instanceof Error ? error.message : "Erreur inconnue";
-    return NextResponse.json(
-      { error: `Échec de la génération de la voix off : ${message}` },
-      { status: 500 }
+      apiKey,
+      language ?? "fr"
     );
+
+    return new NextResponse(audioBuffer, {
+      status: 200,
+      headers: {
+        "Content-Type": "audio/mpeg",
+        "Content-Disposition": `attachment; filename="voiceover.mp3"`,
+      },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Erreur inconnue";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

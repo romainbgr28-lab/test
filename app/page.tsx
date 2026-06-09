@@ -27,7 +27,7 @@ import { StepExport } from "./components/steps/StepExport";
 import { renderVideo } from "@/lib/video-render";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
-import { estimateCost, formatEur, formatPollen } from "@/lib/cost-calculator";
+import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
 
 const STEPS: StepDefinition[] = [
@@ -73,6 +73,7 @@ export default function Home() {
     mistralApiKey: "",
     pollinationsApiKey: "",
     leonardoApiKey: "",
+    googleTtsKey: "",
   });
 
   const [generatingScript, setGeneratingScript] = React.useState(false);
@@ -88,7 +89,7 @@ export default function Home() {
   const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
   const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
 
-  const [voiceId, setVoiceId] = React.useState<VoiceId>("nova");
+  const [voiceId, setVoiceId] = React.useState<VoiceId>("Schedar");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
   const [generatingVoice, setGeneratingVoice] = React.useState(false);
 
@@ -114,6 +115,9 @@ export default function Home() {
     imageModel,
     segmentCount: segments.length || 0,
   });
+
+  const scriptCharCount = segments.reduce((acc, s) => acc + s.narration.length, 0);
+  const voiceCost = estimateVoiceCost(scriptCharCount);
 
   function updateConfig(patch: Partial<StepConfigState>) {
     setConfig((prev) => ({ ...prev, ...patch }));
@@ -395,13 +399,20 @@ export default function Home() {
       const response = await fetch("/api/generate-voice", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: fullText, voice: voiceId, apiKey: config.pollinationsApiKey || undefined }),
+        body: JSON.stringify({
+          text: fullText,
+          voice: voiceId,
+          apiKey: config.googleTtsKey,
+          language: config.language,
+        }),
       });
-      const data = await response.json();
       if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
         throw new Error(data?.error ?? "Erreur lors de la génération de la voix off.");
       }
-      setVoiceoverUrl(data.audioUrl as string);
+      const blob = await response.blob();
+      const url = URL.createObjectURL(blob);
+      setVoiceoverUrl(url);
       toast({ title: "Voix off générée !", variant: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
@@ -561,6 +572,9 @@ export default function Home() {
           <div className="flex gap-2">
             <CostBadge label={formatPollen(cost.totalPollen)} />
             <CostBadge label={formatEur(cost.totalEur)} />
+            {scriptCharCount > 0 && voiceCost.isFree && (
+              <CostBadge label="Voix : Gratuit" className="border-green-700/40 bg-green-500/10 text-green-300" />
+            )}
           </div>
         </div>
       </header>
@@ -632,6 +646,8 @@ export default function Home() {
           generatingMetadata={generatingMetadata}
           onGenerateMetadata={handleGenerateMetadata}
           onProceed={handleProceedToExport}
+          googleTtsKey={config.googleTtsKey}
+          onGoogleTtsKeyChange={(key) => updateConfig({ googleTtsKey: key })}
         />
       )}
 

@@ -74,7 +74,44 @@ export type MistralModel = "mistral-small-latest" | "mistral-large-latest";
 
 export type ImageModel = string;
 
-export type VoiceId = "alloy" | "echo" | "fable" | "onyx" | "nova" | "shimmer";
+export type VoiceId =
+  | "Achird"
+  | "Algenib"
+  | "Alnilam"
+  | "Charon"
+  | "Enceladus"
+  | "Fenrir"
+  | "Iapetus"
+  | "Orus"
+  | "Puck"
+  | "Rasalgethi"
+  | "Sadachbia"
+  | "Sadaltager"
+  | "Schedar"
+  | "Umbriel"
+  | "Zubenelgenubi"
+  | "Achernar"
+  | "Aoede"
+  | "Autonoe"
+  | "Callirrhoe"
+  | "Despina"
+  | "Erinome"
+  | "Gacrux"
+  | "Kore"
+  | "Laomedeia"
+  | "Leda"
+  | "Pulcherrima"
+  | "Sulafat"
+  | "Vindemiatrix"
+  | "Zephyr";
+
+export interface VoiceOption {
+  id: VoiceId;
+  name: string;
+  gender: "homme" | "femme";
+  description: string;
+  recommended?: boolean;
+}
 
 export interface PlatformOption {
   value: Platform;

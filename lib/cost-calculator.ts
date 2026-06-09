@@ -38,3 +38,16 @@ export function formatPollen(value: number): string {
 export function formatCredits(value: number): string {
   return `${value.toFixed(1)} crédits Leonardo`;
 }
+
+export function estimateVoiceCost(characterCount: number): {
+  eur: number;
+  isFree: boolean;
+} {
+  const FREE_MONTHLY_CHARS = 1_000_000;
+  const PRICE_PER_CHAR = 0.00003;
+  const isFree = characterCount <= FREE_MONTHLY_CHARS;
+  return {
+    eur: isFree ? 0 : characterCount * PRICE_PER_CHAR,
+    isFree,
+  };
+}
