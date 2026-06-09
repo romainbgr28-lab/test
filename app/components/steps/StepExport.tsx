@@ -28,8 +28,6 @@ export function StepExport({ project, onExport, exporting }: StepExportProps) {
   const totalDuration = project.segments.reduce((sum, s) => sum + s.duration, 0);
   const cost = estimateCost({
     mistralModel: project.mistralModel as never,
-    imageModel: project.imageModel as never,
-    segmentCount: project.segments.length,
   });
 
   return (
