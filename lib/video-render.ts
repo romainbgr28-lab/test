@@ -308,7 +308,8 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
   await audioContext.resume();
 
   const canvasStream = (canvas as HTMLCanvasElement & { captureStream: (fps: number) => MediaStream }).captureStream(fps);
-  const tracks = [...canvasStream.getVideoTracks(), ...audioDest.stream.getAudioTracks()];
+  const tracks = [...canvasStream.getVideoTracks()];
+  if (audioSources.length > 0) tracks.push(...audioDest.stream.getAudioTracks());
   const stream = new MediaStream(tracks);
 
   const { mimeType, isNativeMP4 } = pickMimeType();
