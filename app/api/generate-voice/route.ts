@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
       language ?? "fr"
     );
 
-    return new NextResponse(audioBuffer, {
+    return new NextResponse(audioBuffer as unknown as BodyInit, {
       status: 200,
       headers: {
         "Content-Type": "audio/mpeg",
