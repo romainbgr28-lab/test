@@ -2,18 +2,21 @@
 
 import * as React from "react";
 import { Download, FileArchive, Loader2 } from "lucide-react";
-import type { VideoProject } from "@/types";
+import type { VideoProject, PublishMetadata } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { estimateCost, formatEur } from "@/lib/cost-calculator";
 
 interface StepExportProps {
   project: VideoProject | null;
-  onExport: () => void;
+  onExport: () => Promise<void>;
   exporting: boolean;
+  publishMetadata?: PublishMetadata;
+  onGenerateMetadata: () => Promise<void>;
+  generatingMetadata: boolean;
 }
 
-export function StepExport({ project, onExport, exporting }: StepExportProps) {
+export function StepExport({ project, onExport, exporting, onGenerateMetadata, generatingMetadata }: StepExportProps) {
   if (!project) {
     return (
       <Card>
