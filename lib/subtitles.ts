@@ -1,25 +1,19 @@
-import type { VideoSegment } from "@/types";
+import type { VideoSegment, SubtitleEntry } from "@/types";
 
-export interface Subtitle {
-  start: number;
-  end: number;
-  text: string;
-}
-
-export function generateSubtitles(segments: VideoSegment[]): Subtitle[] {
+export function generateSubtitles(segments: VideoSegment[]): SubtitleEntry[] {
   let cursor = 0;
   return [...segments].sort((a, b) => a.order - b.order).map((segment) => {
-    const subtitle = {
+    const entry: SubtitleEntry = {
       start: cursor,
       end: cursor + segment.duration,
       text: segment.narration,
     };
     cursor += segment.duration;
-    return subtitle;
+    return entry;
   });
 }
 
-export function toSRT(subtitles: Subtitle[]): string {
+export function toSRT(subtitles: SubtitleEntry[]): string {
   return subtitles
     .map((sub, i) => {
       const start = formatSRTTime(sub.start);

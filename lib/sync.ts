@@ -5,6 +5,7 @@ export function syncSegmentsToAudio(
   audioDuration: number
 ): VideoSegment[] {
   const totalScriptDuration = segments.reduce((sum, s) => sum + s.duration, 0);
+  if (totalScriptDuration === 0) return segments;
   return segments.map((segment) => ({
     ...segment,
     duration: Math.round((segment.duration / totalScriptDuration) * audioDuration * 10) / 10,

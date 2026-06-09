@@ -10,7 +10,6 @@ import type {
   Platform,
   PublishMetadata,
   VideoProject,
-  VideoRenderOptions,
   VideoSegment,
   ViralityScore,
   VisualStyle,
@@ -23,7 +22,6 @@ import { StepImages } from "./components/steps/StepImages";
 import { StepVoice } from "./components/steps/StepVoice";
 import { StepVideo } from "./components/steps/StepVideo";
 import { StepExport } from "./components/steps/StepExport";
-import { renderVideo } from "@/lib/video-render";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
@@ -35,7 +33,7 @@ const STEPS: StepDefinition[] = [
   { index: 1, title: "Script" },
   { index: 2, title: "Images" },
   { index: 3, title: "Voix off" },
-  { index: 4, title: "Vidéo" },
+  { index: 4, title: "Aperçu" },
   { index: 5, title: "Export" },
 ];
 
@@ -92,17 +90,6 @@ export default function Home() {
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
   const [audioDuration, setAudioDuration] = React.useState<number>(0);
 
-  const [renderOptions, setRenderOptions] = React.useState<VideoRenderOptions>({
-    kenBurns: true,
-    transitions: true,
-    subtitleStyle: "karaoke",
-    musicUrl: undefined,
-    musicVolume: 0.15,
-  });
-  const [musicName, setMusicName] = React.useState<string | undefined>(undefined);
-  const [videoResult, setVideoResult] = React.useState<{ url: string; extension: "mp4" | "webm" } | undefined>(undefined);
-  const [rendering, setRendering] = React.useState(false);
-  const [renderProgress, setRenderProgress] = React.useState({ ratio: 0, label: "" });
   const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
   const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
 
@@ -174,7 +161,13 @@ export default function Home() {
           if (!line.startsWith("data:")) continue;
           const jsonStr = line.slice(5).trim();
           if (!jsonStr) continue;
-          const event = JSON.parse(jsonStr) as { type: string; message?: string; score?: number; viralityScore?: ViralityScore; segments?: RawSegment[] };
+          const event = JSON.parse(jsonStr) as {
+            type: string;
+            message?: string;
+            score?: number;
+            viralityScore?: ViralityScore;
+            segments?: RawSegment[];
+          };
           if (event.type === "status" && event.message) {
             setScriptProgress((prev) => [...prev, { message: event.message!, score: event.score }]);
           } else if (event.type === "result" && event.viralityScore && event.segments) {
@@ -233,9 +226,7 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error ?? "Erreur lors de la régénération du segment.");
-      }
+      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la régénération du segment.");
       const raw = data.segment as RawSegment;
       handleSegmentChange(id, {
         narration: raw.narration,
@@ -301,9 +292,7 @@ export default function Home() {
         }),
       });
       const data = await response.json();
-      if (!response.ok) {
-        throw new Error(data?.error ?? "Erreur lors de la génération de l'image.");
-      }
+      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération de l'image.");
       return data.imageUrl as string;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
@@ -404,48 +393,9 @@ export default function Home() {
     setUnlockedStep((u) => Math.max(u, 3));
   }
 
-  function handleProceedToVideo() {
+  function handleProceedToPreview() {
     setCurrentStep(4);
     setUnlockedStep((u) => Math.max(u, 4));
-  }
-
-  function handleRenderOptionsChange(patch: Partial<VideoRenderOptions>) {
-    setRenderOptions((prev) => ({ ...prev, ...patch }));
-  }
-
-  function handleMusicChange(file: File | null) {
-    if (renderOptions.musicUrl) URL.revokeObjectURL(renderOptions.musicUrl);
-    if (!file) {
-      setMusicName(undefined);
-      setRenderOptions((prev) => ({ ...prev, musicUrl: undefined }));
-      return;
-    }
-    const url = URL.createObjectURL(file);
-    setMusicName(file.name);
-    setRenderOptions((prev) => ({ ...prev, musicUrl: url }));
-  }
-
-  async function handleRenderVideo() {
-    setRendering(true);
-    setRenderProgress({ ratio: 0, label: "Initialisation..." });
-    try {
-      if (videoResult?.url) URL.revokeObjectURL(videoResult.url);
-      const result = await renderVideo({
-        segments,
-        voiceoverUrl,
-        platform: config.platform,
-        options: renderOptions,
-        onProgress: (ratio, label) => setRenderProgress({ ratio, label }),
-      });
-      const url = URL.createObjectURL(result.blob);
-      setVideoResult({ url, extension: result.extension });
-      toast({ title: "Vidéo générée !", description: `Fichier ${result.extension.toUpperCase()} prêt au téléchargement.`, variant: "success" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: "Échec du rendu vidéo", description: message, variant: "error" });
-    } finally {
-      setRendering(false);
-    }
   }
 
   async function handleGenerateMetadata() {
@@ -597,11 +547,11 @@ export default function Home() {
 
       {currentStep === 3 && (
         <StepVoice
-          onAudioLoaded={handleAudioLoaded}
+          segments={segments}
           voiceoverUrl={voiceoverUrl}
           audioDuration={audioDuration}
-          segments={segments}
-          onProceed={handleProceedToVideo}
+          onAudioLoaded={handleAudioLoaded}
+          onProceed={handleProceedToPreview}
         />
       )}
 
@@ -609,23 +559,21 @@ export default function Home() {
         <StepVideo
           segments={segments}
           voiceoverUrl={voiceoverUrl}
-          renderOptions={renderOptions}
-          onRenderOptionsChange={handleRenderOptionsChange}
-          onMusicChange={handleMusicChange}
-          musicName={musicName}
-          videoUrl={videoResult?.url}
-          videoExtension={videoResult?.extension}
-          rendering={rendering}
-          renderProgress={renderProgress}
-          onRender={handleRenderVideo}
-          publishMetadata={publishMetadata}
-          generatingMetadata={generatingMetadata}
-          onGenerateMetadata={handleGenerateMetadata}
+          platform={config.platform}
           onProceed={handleProceedToExport}
         />
       )}
 
-      {currentStep === 5 && <StepExport project={project} onExport={handleExport} exporting={exporting} />}
+      {currentStep === 5 && (
+        <StepExport
+          project={project}
+          onExport={handleExport}
+          exporting={exporting}
+          publishMetadata={publishMetadata}
+          onGenerateMetadata={handleGenerateMetadata}
+          generatingMetadata={generatingMetadata}
+        />
+      )}
     </main>
   );
 }

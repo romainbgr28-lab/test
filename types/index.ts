@@ -45,7 +45,7 @@ export interface PublishMetadata {
   hashtags: string[];
 }
 
-export type SubtitleStyle = "karaoke" | "block" | "none";
+export type SubtitleStyle = "karaoke" | "block" | "bottom" | "none";
 
 export interface VideoRenderOptions {
   kenBurns: boolean;
@@ -53,6 +53,7 @@ export interface VideoRenderOptions {
   subtitleStyle: SubtitleStyle;
   musicUrl?: string;
   musicVolume: number;
+  beatDuration: number;
 }
 
 export interface VideoProject {
@@ -121,4 +122,10 @@ export interface PlatformOption {
 export interface DurationOption {
   value: number;
   label: string;
+}
+
+export interface SubtitleEntry {
+  start: number;
+  end: number;
+  text: string;
 }

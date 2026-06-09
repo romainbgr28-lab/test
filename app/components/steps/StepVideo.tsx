@@ -1,243 +1,342 @@
 "use client";
 
 import * as React from "react";
-import { Film, ArrowRight, Loader2, Upload, X, Download, Hash, Sparkles, Copy } from "lucide-react";
-import type { PublishMetadata, VideoRenderOptions, SubtitleStyle, VideoSegment } from "@/types";
+import { Play, Pause, SkipBack, Download, ArrowRight, Film, Loader2 } from "lucide-react";
+import type { VideoSegment, VideoRenderOptions, Platform } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
-import { useToast } from "../ui/Toast";
-
-const SUBTITLE_OPTIONS = [
-  { value: "karaoke", label: "Dynamiques (mot par mot, style TikTok)" },
-  { value: "block", label: "Bloc (phrase entière)" },
-  { value: "none", label: "Aucun sous-titre" },
-];
+import { buildBeats, loadImages, drawFrame, getTotalDuration, generateSubtitles } from "@/lib/video-render";
+import { getDimensionsForPlatform } from "@/lib/pollinations";
 
 interface StepVideoProps {
   segments: VideoSegment[];
   voiceoverUrl?: string;
-  renderOptions: VideoRenderOptions;
-  onRenderOptionsChange: (patch: Partial<VideoRenderOptions>) => void;
-  onMusicChange: (file: File | null) => void;
-  musicName?: string;
-  videoUrl?: string;
-  videoExtension?: "mp4" | "webm";
-  rendering: boolean;
-  renderProgress: { ratio: number; label: string };
-  onRender: () => void;
-  publishMetadata?: PublishMetadata;
-  generatingMetadata: boolean;
-  onGenerateMetadata: () => void;
+  platform: Platform;
   onProceed: () => void;
 }
 
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (v: boolean) => void; label: string }) {
-  return (
-    <button
-      type="button"
-      onClick={() => onChange(!checked)}
-      className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 px-4 py-3 text-left"
-    >
-      <span className="text-sm font-medium text-foreground">{label}</span>
-      <span
-        className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${checked ? "bg-primary" : "bg-muted"}`}
-      >
-        <span
-          className={`absolute top-0.5 h-5 w-5 rounded-full bg-white transition-transform ${
-            checked ? "translate-x-5" : "translate-x-0.5"
-          }`}
-        />
-      </span>
-    </button>
-  );
-}
+const BEAT_OPTIONS = [
+  { value: "1.5", label: "Très dynamique (1.5s)" },
+  { value: "2.5", label: "Dynamique (2.5s)" },
+  { value: "4", label: "Posé (4s)" },
+];
 
-export function StepVideo({
-  segments,
-  voiceoverUrl,
-  renderOptions,
-  onRenderOptionsChange,
-  onMusicChange,
-  musicName,
-  videoUrl,
-  videoExtension,
-  rendering,
-  renderProgress,
-  onRender,
-  publishMetadata,
-  generatingMetadata,
-  onGenerateMetadata,
-  onProceed,
-}: StepVideoProps) {
-  const { toast } = useToast();
-  const musicInputRef = React.useRef<HTMLInputElement>(null);
-  const allImagesReady = segments.length > 0 && segments.every((s) => !!s.imageUrl);
+const SUBTITLE_OPTIONS = [
+  { value: "bottom", label: "Sous-titres activés" },
+  { value: "none", label: "Sans sous-titres" },
+];
 
-  function copyMetadata() {
-    if (!publishMetadata) return;
-    const text = `${publishMetadata.caption}\n\n${publishMetadata.hashtags.map((h) => `#${h}`).join(" ")}`;
-    navigator.clipboard.writeText(text).then(
-      () => toast({ title: "Copié !", description: "Légende et hashtags copiés dans le presse-papiers.", variant: "success" }),
-      () => toast({ title: "Copie impossible", variant: "error" })
-    );
+const DEFAULT_OPTIONS: VideoRenderOptions = {
+  kenBurns: true,
+  transitions: true,
+  subtitleStyle: "bottom",
+  musicVolume: 0,
+  beatDuration: 2.5,
+};
+
+// Preview canvas display size (scaled down from full resolution)
+const PREVIEW_HEIGHT = 520;
+
+export function StepVideo({ segments, voiceoverUrl, platform, onProceed }: StepVideoProps) {
+  const canvasRef = React.useRef<HTMLCanvasElement>(null);
+  const audioRef = React.useRef<HTMLAudioElement>(null);
+  const rafRef = React.useRef<number>(0);
+  const [options, setOptions] = React.useState<VideoRenderOptions>(DEFAULT_OPTIONS);
+  const [ready, setReady] = React.useState(false);
+  const [loading, setLoading] = React.useState(false);
+  const [playing, setPlaying] = React.useState(false);
+  const [currentTime, setCurrentTime] = React.useState(0);
+  const [recording, setRecording] = React.useState(false);
+  const [downloadUrl, setDownloadUrl] = React.useState<string | undefined>();
+
+  const { width: nativeW, height: nativeH } = getDimensionsForPlatform(platform);
+  const isVertical = nativeH > nativeW;
+  const previewW = isVertical ? Math.round((PREVIEW_HEIGHT * nativeW) / nativeH) : Math.round((PREVIEW_HEIGHT * nativeW) / nativeH);
+  const previewH = PREVIEW_HEIGHT;
+
+  const totalDuration = getTotalDuration(segments);
+
+  // Shared state refs for RAF loop (avoids stale closure)
+  const beatsRef = React.useRef(buildBeats(segments, options.beatDuration));
+  const imagesRef = React.useRef<Map<string, HTMLImageElement>>(new Map());
+  const subtitlesRef = React.useRef(generateSubtitles(segments));
+  const optionsRef = React.useRef(options);
+
+  React.useEffect(() => { optionsRef.current = options; }, [options]);
+
+  async function initPreview() {
+    setLoading(true);
+    setReady(false);
+    beatsRef.current = buildBeats(segments, options.beatDuration);
+    subtitlesRef.current = generateSubtitles(segments);
+    imagesRef.current = await loadImages(segments);
+    setReady(true);
+    setLoading(false);
+    // Draw first frame
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+    drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, 0, subtitlesRef.current, options);
+  }
+
+  // Init on mount and when segments/platform change
+  React.useEffect(() => {
+    initPreview();
+    return () => cancelAnimationFrame(rafRef.current);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments.length, platform]);
+
+  // Rebuild beats when beatDuration changes (don't reload images)
+  React.useEffect(() => {
+    beatsRef.current = buildBeats(segments, options.beatDuration);
+    subtitlesRef.current = generateSubtitles(segments);
+  }, [options.beatDuration, segments]);
+
+  // RAF animation loop
+  function startLoop() {
+    const canvas = canvasRef.current;
+    const audio = audioRef.current;
+    if (!canvas || !audio) return;
+    const ctx = canvas.getContext("2d")!;
+
+    function frame() {
+      const t = audio!.currentTime;
+      setCurrentTime(t);
+      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current);
+      if (!audio!.paused && !audio!.ended) {
+        rafRef.current = requestAnimationFrame(frame);
+      } else {
+        setPlaying(false);
+      }
+    }
+    rafRef.current = requestAnimationFrame(frame);
+  }
+
+  function handlePlay() {
+    const audio = audioRef.current;
+    if (!audio || !ready) return;
+    if (playing) {
+      audio.pause();
+      cancelAnimationFrame(rafRef.current);
+      setPlaying(false);
+    } else {
+      audio.play();
+      setPlaying(true);
+      startLoop();
+    }
+  }
+
+  function handleRestart() {
+    const audio = audioRef.current;
+    if (!audio) return;
+    audio.currentTime = 0;
+    setCurrentTime(0);
+    // Draw frame 0
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (ctx) drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, 0, subtitlesRef.current, options);
+    if (playing) { audio.pause(); setPlaying(false); cancelAnimationFrame(rafRef.current); }
+  }
+
+  function handleScrub(e: React.ChangeEvent<HTMLInputElement>) {
+    const t = Number(e.target.value);
+    const audio = audioRef.current;
+    if (audio) audio.currentTime = t;
+    setCurrentTime(t);
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (ctx) drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, options);
+  }
+
+  async function handleRecord() {
+    const canvas = canvasRef.current;
+    const audio = audioRef.current;
+    if (!canvas || !audio || !ready) return;
+
+    setRecording(true);
+    if (downloadUrl) URL.revokeObjectURL(downloadUrl);
+    setDownloadUrl(undefined);
+
+    // Restart
+    audio.currentTime = 0;
+    if (playing) { audio.pause(); cancelAnimationFrame(rafRef.current); setPlaying(false); }
+
+    const ctx = canvas.getContext("2d")!;
+    const stream = canvas.captureStream(30);
+
+    // Add audio track
+    if (voiceoverUrl) {
+      try {
+        const audioCtx = new AudioContext();
+        const resp = await fetch(voiceoverUrl);
+        const buf = await resp.arrayBuffer();
+        const decoded = await audioCtx.decodeAudioData(buf);
+        const dest = audioCtx.createMediaStreamDestination();
+        const src = audioCtx.createBufferSource();
+        src.buffer = decoded;
+        src.connect(dest);
+        for (const track of dest.stream.getAudioTracks()) stream.addTrack(track);
+        src.start(0);
+      } catch { /* no audio */ }
+    }
+
+    const mimeType = MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus")
+      ? "video/webm;codecs=vp9,opus"
+      : "video/webm";
+    const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 4_000_000 });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+    recorder.start(100);
+    const opts = optionsRef.current;
+
+    // Render at real-time speed for proper sync
+    const FPS = 30;
+    const frameInterval = 1000 / FPS;
+    for (let frame = 0; frame <= Math.ceil(totalDuration * FPS); frame++) {
+      const t = frame / FPS;
+      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, opts);
+      await new Promise<void>((r) => setTimeout(r, frameInterval));
+    }
+
+    recorder.stop();
+    await new Promise<void>((resolve) => { recorder.onstop = () => resolve(); });
+
+    const blob = new Blob(chunks, { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    setDownloadUrl(url);
+    setRecording(false);
+  }
+
+  function formatTime(s: number) {
+    const m = Math.floor(s / 60);
+    const sec = Math.floor(s % 60);
+    return `${m}:${sec.toString().padStart(2, "0")}`;
   }
 
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Étape 5 — Montage vidéo</CardTitle>
+        <CardTitle>Étape 4 — Aperçu vidéo</CardTitle>
         <CardDescription>
-          Assemble automatiquement tes images et ta voix off en une vidéo finie (Ken Burns, transitions, sous-titres
-          animés et musique), prête à publier.
+          Prévisualise ta vidéo avec les effets Ken Burns, transitions et sous-titres synchronisés.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
-        {!allImagesReady && (
-          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-600">
-            Génère d&apos;abord toutes les images des segments (étape Images) pour pouvoir monter la vidéo.
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Toggle
-            checked={renderOptions.kenBurns}
-            onChange={(v) => onRenderOptionsChange({ kenBurns: v })}
-            label="Effet Ken Burns (zoom / pan)"
-          />
-          <Toggle
-            checked={renderOptions.transitions}
-            onChange={(v) => onRenderOptionsChange({ transitions: v })}
-            label="Transitions en fondu entre segments"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1.5">
-          <label className="text-sm font-medium text-foreground">Style de sous-titres</label>
-          <Select
-            value={renderOptions.subtitleStyle}
-            onChange={(v) => onRenderOptionsChange({ subtitleStyle: v as SubtitleStyle })}
-            options={SUBTITLE_OPTIONS}
-          />
-          <p className="text-xs text-muted-foreground">
-            Les sous-titres sont synchronisés à partir de la durée de chaque segment.
-          </p>
-        </div>
-
-        <div className="flex flex-col gap-2">
-          <label className="text-sm font-medium text-foreground">Musique de fond (optionnel)</label>
-          <input
-            ref={musicInputRef}
-            type="file"
-            accept="audio/*"
-            className="hidden"
-            onChange={(e) => onMusicChange(e.target.files?.[0] ?? null)}
-          />
-          {musicName ? (
-            <div className="flex items-center gap-3">
-              <span className="truncate rounded-md border border-border bg-secondary/40 px-3 py-1.5 text-sm">
-                {musicName}
-              </span>
-              <Button variant="outline" size="sm" onClick={() => onMusicChange(null)}>
-                <X className="h-4 w-4" />
-                Retirer
-              </Button>
-            </div>
-          ) : (
-            <Button variant="outline" size="sm" className="w-fit" onClick={() => musicInputRef.current?.click()}>
-              <Upload className="h-4 w-4" />
-              Importer une musique
-            </Button>
-          )}
-          {musicName && (
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted-foreground">Volume musique</span>
-              <input
-                type="range"
-                min={0}
-                max={0.6}
-                step={0.05}
-                value={renderOptions.musicVolume}
-                onChange={(e) => onRenderOptionsChange({ musicVolume: Number(e.target.value) })}
-                className="flex-1 accent-primary"
-              />
-              <span className="w-10 text-right text-xs text-muted-foreground">
-                {Math.round(renderOptions.musicVolume * 100)}%
-              </span>
-            </div>
-          )}
-        </div>
-
-        <div className="flex flex-col gap-3 rounded-lg border border-border bg-secondary/30 p-4">
-          <Button onClick={onRender} disabled={rendering || !allImagesReady} size="lg" className="w-fit">
-            {rendering ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
-            {videoUrl ? "Regénérer la vidéo" : "Générer la vidéo"}
-          </Button>
-          {!voiceoverUrl && (
-            <p className="text-xs text-muted-foreground">
-              Astuce : génère une voix off à l&apos;étape précédente pour une vidéo complète avec audio.
-            </p>
-          )}
-          {rendering && (
-            <div className="flex flex-col gap-1.5">
-              <div className="h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className="h-full rounded-full bg-primary transition-all"
-                  style={{ width: `${Math.round(renderProgress.ratio * 100)}%` }}
-                />
-              </div>
-              <p className="text-xs text-muted-foreground">{renderProgress.label}</p>
-              <p className="text-xs text-muted-foreground">
-                Le rendu se fait en temps réel dans ton navigateur : compte environ la durée de la vidéo.
-              </p>
-            </div>
-          )}
-          {videoUrl && !rendering && (
-            <div className="flex flex-col gap-3">
-              <video src={videoUrl} controls className="max-h-[480px] w-fit rounded-lg border border-border" />
-              <a
-                href={videoUrl}
-                download={`studioai-video.${videoExtension ?? "mp4"}`}
-                className="inline-flex w-fit items-center gap-2 rounded-md bg-primary px-4 py-2 text-sm font-medium text-primary-foreground hover:opacity-90"
-              >
-                <Download className="h-4 w-4" />
-                Télécharger la vidéo ({(videoExtension ?? "mp4").toUpperCase()})
-              </a>
-            </div>
-          )}
-        </div>
-
-        <Card className="bg-secondary/30">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2 text-base">
-              <Hash className="h-4 w-4" />
-              Légende &amp; hashtags
-            </CardTitle>
-            <CardDescription>Génère une légende accrocheuse et des hashtags pertinents pour la publication.</CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-3">
-            <Button variant="outline" size="sm" className="w-fit" onClick={onGenerateMetadata} disabled={generatingMetadata}>
-              {generatingMetadata ? <Loader2 className="h-4 w-4 animate-spin" /> : <Sparkles className="h-4 w-4" />}
-              Générer légende &amp; hashtags
-            </Button>
-            {publishMetadata && (
-              <div className="flex flex-col gap-2 rounded-md border border-border bg-background/50 p-3">
-                <p className="text-sm text-foreground">{publishMetadata.caption}</p>
-                <div className="flex flex-wrap gap-1.5">
-                  {publishMetadata.hashtags.map((h) => (
-                    <span key={h} className="rounded-full bg-primary/10 px-2 py-0.5 text-xs text-primary">
-                      #{h}
-                    </span>
-                  ))}
-                </div>
-                <Button variant="ghost" size="sm" className="w-fit" onClick={copyMetadata}>
-                  <Copy className="h-3.5 w-3.5" />
-                  Copier
-                </Button>
+        {/* Canvas preview */}
+        <div className="flex justify-center">
+          <div className="relative overflow-hidden rounded-xl border border-border bg-black shadow-lg"
+            style={{ width: previewW, height: previewH }}>
+            <canvas
+              ref={canvasRef}
+              width={nativeW}
+              height={nativeH}
+              style={{ width: previewW, height: previewH, display: "block" }}
+            />
+            {loading && (
+              <div className="absolute inset-0 flex items-center justify-center bg-black/70">
+                <Loader2 className="h-8 w-8 animate-spin text-white" />
               </div>
             )}
-          </CardContent>
-        </Card>
+          </div>
+        </div>
+
+        {/* Audio element (hidden) */}
+        {voiceoverUrl && (
+          <audio ref={audioRef} src={voiceoverUrl} onEnded={() => setPlaying(false)} />
+        )}
+
+        {/* Playback controls */}
+        <div className="flex flex-col gap-2">
+          <input
+            type="range"
+            min={0}
+            max={totalDuration}
+            step={0.1}
+            value={currentTime}
+            onChange={handleScrub}
+            className="w-full accent-primary"
+            disabled={!ready}
+          />
+          <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <span>{formatTime(currentTime)}</span>
+            <span>{formatTime(totalDuration)}</span>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={handleRestart} disabled={!ready}>
+              <SkipBack className="h-4 w-4" />
+            </Button>
+            <Button size="sm" onClick={handlePlay} disabled={!ready || !voiceoverUrl}>
+              {playing ? <Pause className="h-4 w-4" /> : <Play className="h-4 w-4" />}
+              {playing ? "Pause" : "Lire"}
+            </Button>
+            {!voiceoverUrl && (
+              <span className="text-xs text-muted-foreground">Upload un fichier audio à l&apos;étape 3 pour activer la lecture.</span>
+            )}
+          </div>
+        </div>
+
+        {/* Options */}
+        <div className="grid grid-cols-1 gap-4 rounded-lg border border-border bg-secondary/20 p-4 sm:grid-cols-3">
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Rythme des images</label>
+            <Select
+              value={String(options.beatDuration)}
+              onChange={(v) => setOptions((o) => ({ ...o, beatDuration: Number(v) }))}
+              options={BEAT_OPTIONS}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <label className="text-sm font-medium text-foreground">Sous-titres</label>
+            <Select
+              value={options.subtitleStyle}
+              onChange={(v) => setOptions((o) => ({ ...o, subtitleStyle: v as VideoRenderOptions["subtitleStyle"] }))}
+              options={SUBTITLE_OPTIONS}
+            />
+          </div>
+          <div className="flex flex-col gap-2 justify-end">
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+              <input
+                type="checkbox"
+                checked={options.kenBurns}
+                onChange={(e) => setOptions((o) => ({ ...o, kenBurns: e.target.checked }))}
+                className="accent-primary"
+              />
+              <span className="font-medium text-foreground">Effets Ken Burns</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer select-none text-sm">
+              <input
+                type="checkbox"
+                checked={options.transitions}
+                onChange={(e) => setOptions((o) => ({ ...o, transitions: e.target.checked }))}
+                className="accent-primary"
+              />
+              <span className="font-medium text-foreground">Transitions (crossfade)</span>
+            </label>
+          </div>
+        </div>
+
+        {/* Export WebM */}
+        <div className="flex flex-wrap items-center gap-3">
+          <Button
+            variant="outline"
+            onClick={handleRecord}
+            disabled={recording || !ready}
+          >
+            {recording ? <Loader2 className="h-4 w-4 animate-spin" /> : <Film className="h-4 w-4" />}
+            {recording ? `Export en cours... (~${Math.round(totalDuration)}s)` : "Exporter en WebM"}
+          </Button>
+          {downloadUrl && (
+            <a href={downloadUrl} download="studioai-video.webm">
+              <Button variant="outline">
+                <Download className="h-4 w-4" />
+                Télécharger WebM
+              </Button>
+            </a>
+          )}
+        </div>
       </CardContent>
       <CardFooter>
         <Button onClick={onProceed} size="lg">
