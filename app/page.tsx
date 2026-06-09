@@ -25,7 +25,7 @@ import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
-import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
+import { buildSceneContinuityPrompt, buildSubSegmentPrompts, getDimensionsForPlatform } from "@/lib/pollinations";
 import { syncSegmentsToAudio } from "@/lib/sync";
 
 const STEPS: StepDefinition[] = [
@@ -311,17 +311,14 @@ export default function Home() {
     segment: VideoSegment,
     index: number
   ): Promise<{ imageUrl: string | null; imageUrls: string[]; isVariation: boolean }> {
-    const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
+    const { isVariation, referenceImages } = getEffectivePrompt(index);
     const count = getImageCountForSegment(segment);
-    if (count <= 1) {
-      const imageUrl = await generateImageForSegment(segment, prompt, referenceImages);
-      return { imageUrl, imageUrls: imageUrl ? [imageUrl] : [], isVariation };
-    }
+    const stylePrompt = selectedVisualStyle?.stylePrompt;
+    const prompts = buildSubSegmentPrompts(segment, count, stylePrompt);
     const urls = await Promise.all(
-      Array.from({ length: count }, (_, i) => {
-        const variationPrompt = i === 0 ? prompt : `${prompt}, slight variation`;
+      prompts.map((prompt, i) => {
         const seed = segment.order * 1000 + i * 137;
-        return generateImageForSegment(segment, variationPrompt, referenceImages, seed);
+        return generateImageForSegment(segment, prompt, referenceImages, seed);
       })
     );
     const imageUrls = urls.filter((u): u is string => !!u);
@@ -383,12 +380,13 @@ export default function Home() {
     if (index === -1) return;
     const segment = segments[index];
     setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt: basePrompt, referenceImages } = getEffectivePrompt(index);
+    const { referenceImages } = getEffectivePrompt(index);
     const count = getImageCountForSegment(segment);
+    const stylePrompt = selectedVisualStyle?.stylePrompt;
+    const prompts = buildSubSegmentPrompts(segment, count, stylePrompt);
     const urls = await Promise.all(
-      Array.from({ length: count }, (_, i) => {
-        const prompt = `${basePrompt}, slight variation, same composition, different angle`;
-        const seed = segment.order * 1000 + Math.floor(Math.random() * 999) + i * 137;
+      prompts.map((prompt, i) => {
+        const seed = segment.order * 1000 + Math.floor(Math.random() * 500) + i * 137;
         return generateImageForSegment(segment, prompt, referenceImages, seed);
       })
     );

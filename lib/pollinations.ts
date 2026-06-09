@@ -60,4 +60,50 @@ export function buildSceneContinuityPrompt(
   return { prompt: segment.visualDescription, isVariation: false };
 }
 
+function splitIntoSentences(text: string): string[] {
+  // Split on sentence-ending punctuation, keeping non-empty chunks
+  return text
+    .split(/(?<=[.!?])\s+/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 4);
+}
+
+function chunkArray<T>(arr: T[], n: number): T[][] {
+  if (n <= 1 || arr.length === 0) return [arr];
+  const size = Math.ceil(arr.length / n);
+  const chunks: T[][] = [];
+  for (let i = 0; i < arr.length; i += size) {
+    chunks.push(arr.slice(i, i + size));
+  }
+  // If we have fewer chunks than n (e.g., only 1 sentence for 3 images),
+  // duplicate last chunk to pad
+  while (chunks.length < n) chunks.push(chunks[chunks.length - 1]);
+  return chunks.slice(0, n);
+}
+
+/**
+ * For a segment that needs `count` images, returns `count` distinct image prompts
+ * each grounded in the corresponding portion of the narration text.
+ */
+export function buildSubSegmentPrompts(
+  segment: VideoSegment,
+  count: number,
+  stylePrompt?: string
+): string[] {
+  if (count <= 1) {
+    const base = segment.imagePrompt?.trim() || segment.visualDescription;
+    return [stylePrompt ? `${base}, ${stylePrompt}` : base];
+  }
+
+  const sentences = splitIntoSentences(segment.narration);
+  const chunks = chunkArray(sentences, count);
+  const styleTag = stylePrompt ? `, ${stylePrompt}` : "";
+
+  return chunks.map((chunk) => {
+    const narrationPart = chunk.join(" ");
+    // Build a visual prompt: "Cinematic scene showing [narration part]. [visual context]."
+    return `Cinematic scene visually illustrating: "${narrationPart}". Context: ${segment.visualDescription}${styleTag}`;
+  });
+}
+
 export const TTS_ENDPOINT = "https://text.pollinations.ai/";
