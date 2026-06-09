@@ -173,16 +173,27 @@ function drawSubtitles(
   }
 }
 
-function pickMimeType(): string {
-  const candidates = [
+function pickMimeType(): { mimeType: string; isNativeMP4: boolean } {
+  if (typeof MediaRecorder === "undefined") return { mimeType: "video/webm", isNativeMP4: false };
+
+  const mp4Candidates = [
+    "video/mp4;codecs=avc1,mp4a.40.2",
+    "video/mp4;codecs=avc1",
+    "video/mp4",
+  ];
+  for (const type of mp4Candidates) {
+    if (MediaRecorder.isTypeSupported(type)) return { mimeType: type, isNativeMP4: true };
+  }
+
+  const webmCandidates = [
     "video/webm;codecs=vp9,opus",
     "video/webm;codecs=vp8,opus",
     "video/webm",
   ];
-  for (const type of candidates) {
-    if (typeof MediaRecorder !== "undefined" && MediaRecorder.isTypeSupported(type)) return type;
+  for (const type of webmCandidates) {
+    if (MediaRecorder.isTypeSupported(type)) return { mimeType: type, isNativeMP4: false };
   }
-  return "video/webm";
+  return { mimeType: "video/webm", isNativeMP4: false };
 }
 
 async function convertWebmToMp4(webm: Blob, onProgress?: (ratio: number, label: string) => void): Promise<Blob | null> {
@@ -297,7 +308,7 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
   const tracks = [...canvasStream.getVideoTracks(), ...audioDest.stream.getAudioTracks()];
   const stream = new MediaStream(tracks);
 
-  const mimeType = pickMimeType();
+  const { mimeType, isNativeMP4 } = pickMimeType();
   const recorder = new MediaRecorder(stream, { mimeType, videoBitsPerSecond: 6_000_000 });
   const chunks: BlobPart[] = [];
   recorder.ondataavailable = (e) => {
@@ -371,13 +382,18 @@ export async function renderVideo(input: RenderInput): Promise<RenderResult> {
       // already stopped
     }
   }
-  const webmBlob = await recordingDone;
+  const recordedBlob = await recordingDone;
   await audioContext.close();
 
-  const mp4 = await convertWebmToMp4(webmBlob, onProgress);
+  if (isNativeMP4) {
+    onProgress?.(1, "Terminé");
+    return { blob: recordedBlob, mimeType: "video/mp4", extension: "mp4" };
+  }
+
+  const mp4 = await convertWebmToMp4(recordedBlob, onProgress);
   onProgress?.(1, "Terminé");
   if (mp4) {
     return { blob: mp4, mimeType: "video/mp4", extension: "mp4" };
   }
-  return { blob: webmBlob, mimeType, extension: "webm" };
+  return { blob: recordedBlob, mimeType, extension: "webm" };
 }

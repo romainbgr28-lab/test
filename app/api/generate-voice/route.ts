@@ -28,20 +28,30 @@ export async function POST(request: Request) {
       Authorization: `Bearer ${key}`,
     };
 
-    const response = await fetch(TTS_ENDPOINT, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({
-        model: "openai-audio",
-        voice,
-        messages: [{ role: "user", content: text }],
-      }),
+    const requestBody = JSON.stringify({
+      model: "openai-audio",
+      voice,
+      messages: [{ role: "user", content: text }],
     });
+
+    let response: Response | null = null;
+    const maxAttempts = 4;
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      if (attempt > 0) {
+        await new Promise((r) => setTimeout(r, 1000 * attempt));
+      }
+      response = await fetch(TTS_ENDPOINT, { method: "POST", headers, body: requestBody });
+      if (response.status !== 429) break;
+    }
+    if (!response) throw new Error("Aucune réponse du service TTS.");
 
     if (!response.ok) {
       const errorText = await response.text();
+      const hint = response.status === 429
+        ? " Le service est saturé, réessaie dans quelques secondes."
+        : "";
       return NextResponse.json(
-        { error: `Le service de voix off a renvoyé une erreur (${response.status}).`, details: errorText },
+        { error: `Le service de voix off a renvoyé une erreur (${response.status}).${hint}`, details: errorText },
         { status: 502 }
       );
     }
