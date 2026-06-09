@@ -187,30 +187,50 @@ function pickMimeType(): string {
 
 async function convertWebmToMp4(webm: Blob, onProgress?: (ratio: number, label: string) => void): Promise<Blob | null> {
   try {
-    onProgress?.(0.9, "Conversion en MP4...");
+    onProgress?.(0.88, "Chargement du convertisseur MP4...");
     const { FFmpeg } = await import("@ffmpeg/ffmpeg");
     const { fetchFile, toBlobURL } = await import("@ffmpeg/util");
     const ffmpeg = new FFmpeg();
-    const baseURL = "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd";
-    await ffmpeg.load({
-      coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
-      wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
-    });
+
+    const cdnBases = [
+      "https://cdn.jsdelivr.net/npm/@ffmpeg/core@0.12.6/dist/umd",
+      "https://unpkg.com/@ffmpeg/core@0.12.6/dist/umd",
+    ];
+
+    let loaded = false;
+    for (const baseURL of cdnBases) {
+      try {
+        await ffmpeg.load({
+          coreURL: await toBlobURL(`${baseURL}/ffmpeg-core.js`, "text/javascript"),
+          wasmURL: await toBlobURL(`${baseURL}/ffmpeg-core.wasm`, "application/wasm"),
+        });
+        loaded = true;
+        break;
+      } catch {
+        // try next CDN
+      }
+    }
+    if (!loaded) throw new Error("Impossible de charger FFmpeg depuis les CDN disponibles.");
+
+    onProgress?.(0.92, "Conversion en MP4...");
     await ffmpeg.writeFile("input.webm", await fetchFile(webm));
     await ffmpeg.exec([
       "-i", "input.webm",
       "-c:v", "libx264",
       "-pix_fmt", "yuv420p",
       "-preset", "veryfast",
+      "-movflags", "+faststart",
       "-c:a", "aac",
       "-b:a", "192k",
       "output.mp4",
     ]);
     const data = await ffmpeg.readFile("output.mp4");
     const bytes = data instanceof Uint8Array ? data : new TextEncoder().encode(String(data));
-    return new Blob([bytes as BlobPart], { type: "video/mp4" });
+    const mp4Blob = new Blob([bytes as BlobPart], { type: "video/mp4" });
+    if (mp4Blob.size < 1000) throw new Error("Fichier MP4 généré vide ou invalide.");
+    return mp4Blob;
   } catch (error) {
-    console.error("Conversion MP4 échouée, repli sur WebM :", error);
+    console.error("Conversion MP4 échouée :", error);
     return null;
   }
 }
