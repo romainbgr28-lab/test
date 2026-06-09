@@ -235,3 +235,25 @@ export function getTotalDuration(segments: VideoSegment[]): number {
 }
 
 export { generateSubtitles };
+
+// ─── Clip-based beat builder ─────────────────────────────────────────────────
+
+interface ClipLike {
+  imageUrl: string;
+  duration: number;
+}
+
+export function clipsToBeats(clips: ClipLike[]): Beat[] {
+  let cursor = 0;
+  return clips.map((clip, i) => {
+    const traj = TRAJECTORIES[i % TRAJECTORIES.length];
+    const beat: Beat = {
+      startTime: cursor,
+      endTime: cursor + clip.duration,
+      imageUrl: clip.imageUrl,
+      ...traj,
+    };
+    cursor += clip.duration;
+    return beat;
+  });
+}

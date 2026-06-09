@@ -150,3 +150,13 @@ export interface SubtitleEntry {
   end: number;
   text: string;
 }
+
+export interface Clip {
+  id: string;
+  segmentId: string;
+  segmentOrder: number;
+  beatIndex: number;
+  imageUrl: string;
+  duration: number;
+  narration: string;
+}
