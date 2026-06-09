@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import JSZip from "jszip";
 import { callMistralChat } from "@/lib/mistral";
 import type { VideoProject } from "@/types";
+import { generateSubtitles, toSRT } from "@/lib/subtitles";
 
 export const runtime = "nodejs";
 
@@ -137,6 +138,25 @@ export async function POST(request: Request) {
       const hashtags = project.publishMetadata.hashtags.map((h) => `#${h}`).join(" ");
       zip.file("legende_publication.txt", `${project.publishMetadata.caption}\n\n${hashtags}`.trim());
     }
+
+    const subtitles = generateSubtitles(sortedSegments);
+    zip.file("subtitles.srt", toSRT(subtitles));
+
+    const captionLines = subtitles.map(
+      (sub, i) => `Segment ${i + 1} : ${sub.start.toFixed(1)}s à ${sub.end.toFixed(1)}s - ${sub.text}`
+    );
+    zip.file("subtitles_capcut.txt", captionLines.join("\n"));
+
+    const totalDurationReport = project.segments.reduce((sum, s) => sum + s.duration, 0);
+    const avgDuration = totalDurationReport / project.segments.length;
+    const syncReportLines = [
+      `Durée audio : ${totalDurationReport.toFixed(1)}s`,
+      `Nombre de segments : ${project.segments.length}`,
+      `Durée moyenne par segment : ${avgDuration.toFixed(1)}s`,
+      "Segments :",
+      ...subtitles.map((sub, i) => `${i + 1}. [${sub.start.toFixed(1)}s - ${sub.end.toFixed(1)}s] : ${sub.text.slice(0, 60)}${sub.text.length > 60 ? "..." : ""}`),
+    ];
+    zip.file("sync_report.txt", syncReportLines.join("\n"));
 
     const metadata = {
       id: project.id,

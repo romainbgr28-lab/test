@@ -14,7 +14,6 @@ import type {
   VideoSegment,
   ViralityScore,
   VisualStyle,
-  VoiceId,
 } from "@/types";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
@@ -29,6 +28,7 @@ import { useToast } from "./components/ui/Toast";
 import { uid } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
+import { syncSegmentsToAudio } from "@/lib/sync";
 
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
@@ -89,9 +89,8 @@ export default function Home() {
   const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
   const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
 
-  const [voiceId, setVoiceId] = React.useState<VoiceId>("Schedar");
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
-  const [generatingVoice, setGeneratingVoice] = React.useState(false);
+  const [audioDuration, setAudioDuration] = React.useState<number>(0);
 
   const [renderOptions, setRenderOptions] = React.useState<VideoRenderOptions>({
     kenBurns: true,
@@ -388,38 +387,16 @@ export default function Home() {
     });
   }
 
-  async function handleGenerateVoice() {
-    setGeneratingVoice(true);
-    try {
-      const fullText = segments
-        .slice()
-        .sort((a, b) => a.order - b.order)
-        .map((s) => s.narration)
-        .join(" ");
-      const response = await fetch("/api/generate-voice", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          text: fullText,
-          voice: voiceId,
-          apiKey: config.googleTtsKey,
-          language: config.language,
-        }),
-      });
-      if (!response.ok) {
-        const data = await response.json().catch(() => ({}));
-        throw new Error(data?.error ?? "Erreur lors de la génération de la voix off.");
-      }
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      setVoiceoverUrl(url);
-      toast({ title: "Voix off générée !", variant: "success" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: "Échec de la génération de la voix off", description: message, variant: "error" });
-    } finally {
-      setGeneratingVoice(false);
-    }
+  function handleAudioLoaded(url: string, duration: number) {
+    setVoiceoverUrl(url);
+    setAudioDuration(duration);
+    const synced = syncSegmentsToAudio(segments, duration);
+    setSegments(synced);
+    toast({
+      title: "Audio synchronisé",
+      description: `${synced.length} segments synchronisés sur ${duration.toFixed(1)}s`,
+      variant: "success",
+    });
   }
 
   function handleProceedToVoice() {
@@ -512,7 +489,7 @@ export default function Home() {
       targetDuration: config.duration,
       segments,
       voiceoverUrl,
-      voiceId,
+      voiceId: "",
       mistralModel: config.mistralModel,
       imageModel,
       viralityScore: viralityScore ?? undefined,
@@ -620,11 +597,10 @@ export default function Home() {
 
       {currentStep === 3 && (
         <StepVoice
-          voiceId={voiceId}
-          onVoiceChange={setVoiceId}
-          onGenerateVoice={handleGenerateVoice}
+          onAudioLoaded={handleAudioLoaded}
           voiceoverUrl={voiceoverUrl}
-          generatingVoice={generatingVoice}
+          audioDuration={audioDuration}
+          segments={segments}
           onProceed={handleProceedToVideo}
         />
       )}

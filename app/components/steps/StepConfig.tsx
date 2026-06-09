@@ -53,7 +53,7 @@ export interface StepConfigState {
   googleTtsKey: string;
 }
 
-type ApiKeyField = "mistralApiKey" | "pollinationsApiKey" | "leonardoApiKey" | "googleTtsKey";
+type ApiKeyField = "mistralApiKey" | "leonardoApiKey";
 
 const API_KEYS_STORAGE_KEY = "studioai:apiKeys";
 
@@ -173,27 +173,6 @@ export function StepConfig({ state, onChange, onGenerate, generating }: StepConf
               placeholder="Laisse vide pour utiliser la clé du serveur"
               autoComplete="off"
             />
-          </div>
-          <div className="flex flex-col gap-1.5">
-            <label className="text-sm font-medium text-foreground">Clé API Google Cloud TTS</label>
-            <Input
-              type="password"
-              value={state.googleTtsKey ?? ""}
-              onChange={(e) => updateApiKey({ googleTtsKey: e.target.value })}
-              placeholder="AIza..."
-              autoComplete="off"
-            />
-            <p className="text-xs text-muted-foreground">
-              Gratuit jusqu&apos;à 1 million de caractères/mois.{" "}
-              <a
-                href="https://console.cloud.google.com/apis/credentials"
-                target="_blank"
-                rel="noopener noreferrer"
-                className="underline"
-              >
-                Créer une clé API
-              </a>
-            </p>
           </div>
           <div className="flex flex-col gap-1.5">
             <label className="text-sm font-medium text-foreground">Clé API Leonardo</label>
