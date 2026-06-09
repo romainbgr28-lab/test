@@ -3,6 +3,7 @@
 import * as React from "react";
 import { Wand2 } from "lucide-react";
 import type {
+  Clip,
   HookVariant,
   ImageModel,
   SubtitleEntry,
@@ -16,6 +17,7 @@ import type {
   ViralityScore,
   VisualStyle,
 } from "@/types";
+import { buildClipsFromSegments, syncClipsToAudio, generateSubtitlesFromClips } from "@/lib/clips";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
@@ -29,7 +31,6 @@ import { uid } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, buildSubSegmentPrompts, getDimensionsForPlatform } from "@/lib/pollinations";
 import { syncSegmentsToAudio } from "@/lib/sync";
-import { generateSubtitles } from "@/lib/subtitles";
 
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
@@ -96,6 +97,8 @@ export default function Home() {
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
   const [audioDuration, setAudioDuration] = React.useState<number>(0);
   const [subtitles, setSubtitles] = React.useState<SubtitleEntry[]>([]);
+  const [clips, setClips] = React.useState<Clip[]>([]);
+  const [beatDuration, setBeatDuration] = React.useState(2.5);
 
   const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
   const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
@@ -457,10 +460,13 @@ export default function Home() {
     setAudioDuration(duration);
     const synced = syncSegmentsToAudio(segments, duration);
     setSegments(synced);
-    setSubtitles(generateSubtitles(synced));
+    const newClips = buildClipsFromSegments(synced, beatDuration);
+    const syncedClips = syncClipsToAudio(newClips, duration);
+    setClips(syncedClips);
+    setSubtitles(generateSubtitlesFromClips(syncedClips));
     toast({
       title: "Audio synchronisé",
-      description: `${synced.length} segments synchronisés sur ${duration.toFixed(1)}s, sous-titres générés.`,
+      description: `${syncedClips.length} clips sur ${duration.toFixed(1)}s, sous-titres générés.`,
       variant: "success",
     });
   }
@@ -471,12 +477,22 @@ export default function Home() {
   }
 
   function handleProceedToPreview() {
-    // Sans audio uploadé, on génère quand même des sous-titres depuis le script
+    const builtClips = buildClipsFromSegments(segments, beatDuration);
+    const finalClips = audioDuration > 0 ? syncClipsToAudio(builtClips, audioDuration) : builtClips;
+    setClips(finalClips);
     if (subtitles.length === 0 && segments.length > 0) {
-      setSubtitles(generateSubtitles(segments));
+      setSubtitles(generateSubtitlesFromClips(finalClips));
     }
     setCurrentStep(4);
     setUnlockedStep((u) => Math.max(u, 4));
+  }
+
+  function handleClipDurationChange(id: string, duration: number) {
+    setClips((prev) => {
+      const updated = prev.map((c) => (c.id === id ? { ...c, duration } : c));
+      setSubtitles(generateSubtitlesFromClips(updated));
+      return updated;
+    });
   }
 
   async function handleGenerateMetadata() {
@@ -513,6 +529,7 @@ export default function Home() {
 
   function handleProceedToExport() {
     if (!config.profile) return;
+    const projectClips = clips.length > 0 ? clips : buildClipsFromSegments(segments, beatDuration);
     const newProject: VideoProject = {
       id: uid(),
       subject: config.subject,
@@ -525,7 +542,7 @@ export default function Home() {
       imageModel,
       viralityScore: viralityScore ?? undefined,
       publishMetadata: publishMetadata ?? undefined,
-      subtitles: subtitles.length > 0 ? subtitles : generateSubtitles(segments),
+      subtitles: subtitles.length > 0 ? subtitles : generateSubtitlesFromClips(projectClips),
       researchSources: researchSources.length > 0 ? researchSources : undefined,
       audioDuration: audioDuration > 0 ? audioDuration : undefined,
       createdAt: new Date().toISOString(),
@@ -574,7 +591,7 @@ export default function Home() {
             <Wand2 className="h-5 w-5" />
           </span>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">StudioAI</h1>
+            <h1 className="text-xl font-bold tracking-tight gradient-text">StudioAI</h1>
             <p className="text-sm text-muted-foreground">Crée des vidéos faceless virales en 6 étapes</p>
           </div>
         </div>
@@ -647,11 +664,12 @@ export default function Home() {
 
       {currentStep === 4 && (
         <StepVideo
-          segments={segments}
+          clips={clips}
           voiceoverUrl={voiceoverUrl}
           platform={config.platform}
           subtitles={subtitles}
           onSubtitlesChange={setSubtitles}
+          onClipDurationChange={handleClipDurationChange}
           onProceed={handleProceedToExport}
         />
       )}
