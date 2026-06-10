@@ -163,20 +163,6 @@ export function StepImages({
                       <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg border border-border bg-secondary">
                         <Skeleton className="h-full w-full" />
                       </div>
-                    ) : segment.imageUrls && segment.imageUrls.length > 1 ? (
-                      <div className="flex flex-col gap-1">
-                        <div className="grid grid-cols-2 gap-1">
-                          {segment.imageUrls.map((url, i) => (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <div key={i} className="relative aspect-[9/16] overflow-hidden rounded-md border border-border bg-secondary">
-                              <img src={url} alt={`Visuel ${segment.order}.${i + 1}`} className="h-full w-full object-cover" />
-                              <span className="absolute bottom-0.5 right-1 text-[9px] font-bold text-white/80 drop-shadow">
-                                {i + 1}
-                              </span>
-                            </div>
-                          ))}
-                        </div>
-                      </div>
                     ) : (
                       <div className="relative aspect-[9/16] w-full overflow-hidden rounded-lg border border-border bg-secondary">
                         {segment.imageUrl ? (

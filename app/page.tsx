@@ -352,7 +352,7 @@ export default function Home() {
     }
   }
 
-  const IMAGE_INTERVAL = 2.5; // seconds between image changes
+  const IMAGE_INTERVAL = 3; // seconds between image changes
 
   function getImageCountForSegment(segment: VideoSegment): number {
     return Math.max(1, Math.ceil(segment.duration / IMAGE_INTERVAL));

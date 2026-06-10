@@ -59,12 +59,12 @@ RÈGLES VISUELLES :
 - Les visuels doivent RENFORCER la narration, pas juste l'illustrer
 - Varier les types de plans : close-up, wide shot, abstract, data visualization, metaphor visuelle
 
-RECHERCHE WEB OBLIGATOIRE :
-Tu as accès à un outil de recherche internet en temps réel. Utilise-le systématiquement avant de rédiger pour :
-- trouver les tendances, sujets chauds et formulations qui cartonnent en ce moment sur ce thème et sur cette plateforme
-- collecter des chiffres, statistiques et faits récents et vérifiables à intégrer dans la narration pour renforcer la crédibilité et l'effet "wahou"
-- repérer les angles et accroches qui fonctionnent déjà sur des contenus similaires, pour t'en inspirer sans copier
-N'invente jamais une statistique : si tu avances un chiffre, il doit provenir d'une recherche réelle.
+RÈGLE ABSOLUE SUR LES FAITS :
+Une NOTE DE RECHERCHE te sera fournie avec des faits, chiffres et informations réelles et vérifiées.
+- Utilise UNIQUEMENT les faits présents dans cette note. N'en invente aucun.
+- Si tu cites un chiffre, une date, un événement ou une personne, il doit être explicitement mentionné dans la note.
+- N'extrapole pas, ne complète pas de mémoire : si l'information n'est pas dans la note, ne l'utilise pas.
+- Ne fabrique jamais de statistiques, résultats sportifs, classements ou événements non confirmés dans la note.
 
 Instructions de niche / sujet du script (à respecter scrupuleusement) : ${params.scriptInstructions}
 ${params.viralityInstructions?.trim() ? `Instructions de viralité et de format à privilégier pour ce profil : ${params.viralityInstructions.trim()}\n` : ""}Plateforme : ${platformLabel}
