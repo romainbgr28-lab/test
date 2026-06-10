@@ -5,6 +5,7 @@ import { Wand2 } from "lucide-react";
 import type {
   Clip,
   ImageModel,
+  ImageSlot,
   PublishMetadata,
   SubtitleEntry,
   VideoProject,
@@ -258,25 +259,15 @@ export default function Home() {
     if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des prompts d'images.");
     const prompts = data.prompts as string[];
 
-    return syncedSegments.map((seg, i) => ({
-      ...seg,
-      visualDescription: prompts[i] ?? seg.visualDescription,
-      imagePrompt: prompts[i] ?? seg.imagePrompt,
-    }));
-  }
-
-  function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean; referenceImages?: string[] } {
-    const segment = segments[index];
-    const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
-    const base = segment.imagePrompt?.trim() || suggested;
-    const referenceImages = selectedVisualStyle?.referenceImages?.length
-      ? selectedVisualStyle.referenceImages
-      : undefined;
-    return { prompt: base, isVariation, referenceImages };
-  }
-
-  function handleSegmentPromptChange(id: string, imagePrompt: string) {
-    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
+    // Initialiser les slots par segment avec des prompts distincts
+    return syncedSegments.map((seg, i) => {
+      const basePrompt = prompts[i] ?? seg.visualDescription;
+      const count = seg.imageCount ?? Math.max(1, Math.ceil(seg.duration / 3));
+      const stylePrompt = selectedVisualStyle?.stylePrompt;
+      const subPrompts = buildSubSegmentPrompts({ ...seg, imagePrompt: basePrompt }, count, stylePrompt);
+      const slots: ImageSlot[] = subPrompts.map((p) => ({ id: uid(), prompt: p }));
+      return { ...seg, visualDescription: basePrompt, imagePrompt: basePrompt, imageSlots: slots };
+    });
   }
 
   function handleSelectVisualStyle(style: VisualStyle | null) {
@@ -284,140 +275,142 @@ export default function Home() {
     setSelectedVisualStyleId(style?.id ?? null);
   }
 
-  async function generateImageForSegment(
-    segment: VideoSegment,
-    promptOverride: string,
-    referenceImages?: string[],
-    seedOverride?: number
-  ): Promise<string | null> {
-    if (!config.profile) return null;
+  function handleImageCountChange(segId: string, count: number) {
+    const newCount = Math.max(1, Math.min(10, count));
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId) return s;
+        const stylePrompt = selectedVisualStyle?.stylePrompt;
+        const subPrompts = buildSubSegmentPrompts(s, newCount, stylePrompt);
+        const existing = s.imageSlots ?? [];
+        const newSlots: ImageSlot[] = Array.from({ length: newCount }, (_, i) => ({
+          id: existing[i]?.id ?? uid(),
+          prompt: existing[i]?.prompt ?? subPrompts[i] ?? s.imagePrompt ?? "",
+          referenceImage: existing[i]?.referenceImage,
+          imageUrl: existing[i]?.imageUrl,
+        }));
+        return { ...s, imageCount: newCount, imageSlots: newSlots };
+      })
+    );
+  }
+
+  function handleSlotPromptChange(segId: string, slotIdx: number, prompt: string) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) => (i === slotIdx ? { ...slot, prompt } : slot));
+        return { ...s, imageSlots: slots };
+      })
+    );
+  }
+
+  function handleSlotReferenceChange(segId: string, slotIdx: number, referenceImage: string | undefined) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) => (i === slotIdx ? { ...slot, referenceImage } : slot));
+        return { ...s, imageSlots: slots };
+      })
+    );
+  }
+
+  async function generateOneSlot(segment: VideoSegment, slotIdx: number): Promise<string | null> {
+    const slot = segment.imageSlots?.[slotIdx];
+    if (!slot) return null;
     const dimensions = getDimensionsForPlatform(config.platform);
-    const seed = seedOverride ?? segment.order * 1000;
+    const styleRefs = selectedVisualStyle?.referenceImages?.length ? selectedVisualStyle.referenceImages : [];
+    const refImages = slot.referenceImage ? [slot.referenceImage, ...styleRefs] : styleRefs.length ? styleRefs : undefined;
+    const seed = segment.order * 1000 + slotIdx * 137;
     try {
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: promptOverride,
+          prompt: slot.prompt,
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
           seed,
           apiKey: config.leonardoApiKey || undefined,
-          referenceImages: referenceImages || undefined,
+          referenceImages: refImages,
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération de l'image.");
+      if (!response.ok) throw new Error(data?.error ?? "Erreur génération image");
       return data.imageUrl as string;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: `Échec image segment ${segment.order}`, description: message, variant: "error" });
+      toast({ title: `Échec image ${segment.order}-${slotIdx + 1}`, description: message, variant: "error" });
       return null;
     }
   }
 
-  const IMAGE_INTERVAL = 3; // seconds between image changes
-
-  function getImageCountForSegment(segment: VideoSegment): number {
-    return Math.max(1, Math.ceil(segment.duration / IMAGE_INTERVAL));
-  }
-
-  async function generateImagesForSegment(
-    segment: VideoSegment,
-    index: number
-  ): Promise<{ imageUrl: string | null; imageUrls: string[]; isVariation: boolean }> {
-    const { isVariation, referenceImages } = getEffectivePrompt(index);
-    const count = getImageCountForSegment(segment);
-    const stylePrompt = selectedVisualStyle?.stylePrompt;
-    const prompts = buildSubSegmentPrompts(segment, count, stylePrompt);
-    const urls = await Promise.all(
-      prompts.map((prompt, i) => {
-        const seed = segment.order * 1000 + i * 137;
-        return generateImageForSegment(segment, prompt, referenceImages, seed);
+  function applySlotResults(segId: string, slotResults: (string | null)[]) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) =>
+          slotResults[i] ? { ...slot, imageUrl: slotResults[i]! } : slot
+        );
+        const imageUrls = slots.map((sl) => sl.imageUrl).filter(Boolean) as string[];
+        return { ...s, imageSlots: slots, imageUrl: imageUrls[0], imageBlob: imageUrls[0], imageUrls };
       })
     );
-    const imageUrls = urls.filter((u): u is string => !!u);
-    return { imageUrl: imageUrls[0] ?? null, imageUrls, isVariation };
   }
 
   async function handleGenerateAllImages() {
     setGeneratingImages(true);
-    setImageLoadingIds(new Set(segments.map((s) => s.id)));
+    const allSlotIds = new Set(
+      segments.flatMap((s) => (s.imageSlots ?? []).map((_, i) => `${s.id}-${i}`))
+    );
+    setImageLoadingIds(allSlotIds);
     try {
-      const results = await Promise.all(
-        segments.map(async (segment, index) => {
-          const result = await generateImagesForSegment(segment, index);
-          return { id: segment.id, ...result };
+      await Promise.all(
+        segments.map(async (segment) => {
+          if (!segment.imageSlots?.length) return;
+          const results = await Promise.all(
+            segment.imageSlots.map((_, i) => generateOneSlot(segment, i))
+          );
+          applySlotResults(segment.id, results);
+          setImageLoadingIds((prev) => {
+            const next = new Set(prev);
+            segment.imageSlots!.forEach((_, i) => next.delete(`${segment.id}-${i}`));
+            return next;
+          });
         })
       );
-      setSegments((prev) =>
-        prev.map((s) => {
-          const result = results.find((r) => r.id === s.id);
-          if (result?.imageUrl) {
-            return { ...s, imageUrl: result.imageUrl, imageBlob: result.imageUrl, imageUrls: result.imageUrls, isSceneVariation: result.isVariation };
-          }
-          return s;
-        })
-      );
-      const successCount = results.filter((r) => r.imageUrl).length;
-      toast({
-        title: "Génération des images terminée",
-        description: `${successCount}/${segments.length} segments générés avec succès.`,
-        variant: successCount === segments.length ? "success" : "info",
-      });
+      toast({ title: "Toutes les images générées", variant: "success" });
     } finally {
       setGeneratingImages(false);
       setImageLoadingIds(new Set());
     }
   }
 
-  async function handleRegenerateImage(id: string) {
-    const index = segments.findIndex((s) => s.id === id);
-    if (index === -1) return;
-    const segment = segments[index];
-    setImageLoadingIds((prev) => new Set(prev).add(id));
-    const result = await generateImagesForSegment(segment, index);
-    if (result.imageUrl) {
-      setSegments((prev) =>
-        prev.map((s) => s.id === id ? { ...s, imageUrl: result.imageUrl!, imageBlob: result.imageUrl!, imageUrls: result.imageUrls, isSceneVariation: result.isVariation } : s)
-      );
-      toast({ title: `Images du segment ${segment.order} régénérées (${result.imageUrls.length})`, variant: "success" });
-    }
-    setImageLoadingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  async function handleRegenerateSlot(segId: string, slotIdx: number) {
+    const segment = segments.find((s) => s.id === segId);
+    if (!segment) return;
+    const loadId = `${segId}-${slotIdx}`;
+    setImageLoadingIds((prev) => new Set(prev).add(loadId));
+    const url = await generateOneSlot(segment, slotIdx);
+    applySlotResults(segId, segment.imageSlots!.map((_, i) => (i === slotIdx ? url : null)));
+    setImageLoadingIds((prev) => { const next = new Set(prev); next.delete(loadId); return next; });
   }
 
-  async function handleGenerateImageVariation(id: string) {
-    const index = segments.findIndex((s) => s.id === id);
-    if (index === -1) return;
-    const segment = segments[index];
-    setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { referenceImages } = getEffectivePrompt(index);
-    const count = getImageCountForSegment(segment);
-    const stylePrompt = selectedVisualStyle?.stylePrompt;
-    const prompts = buildSubSegmentPrompts(segment, count, stylePrompt);
-    const urls = await Promise.all(
-      prompts.map((prompt, i) => {
-        const seed = segment.order * 1000 + Math.floor(Math.random() * 500) + i * 137;
-        return generateImageForSegment(segment, prompt, referenceImages, seed);
-      })
-    );
-    const imageUrls = urls.filter((u): u is string => !!u);
-    if (imageUrls.length > 0) {
-      setSegments((prev) =>
-        prev.map((s) => s.id === id ? { ...s, imageUrl: imageUrls[0], imageBlob: imageUrls[0], imageUrls, isSceneVariation: true } : s)
-      );
-      toast({ title: `${imageUrls.length} variations générées pour le segment ${segment.order}`, variant: "success" });
-    }
-    setImageLoadingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  async function handleRegenerateSegment(segId: string) {
+    const segment = segments.find((s) => s.id === segId);
+    if (!segment?.imageSlots?.length) return;
+    const loadIds = new Set(segment.imageSlots.map((_, i) => `${segId}-${i}`));
+    setImageLoadingIds((prev) => new Set([...prev, ...loadIds]));
+    const results = await Promise.all(segment.imageSlots.map((_, i) => generateOneSlot(segment, i)));
+    applySlotResults(segId, results);
+    setImageLoadingIds((prev) => { const next = new Set(prev); loadIds.forEach((id) => next.delete(id)); return next; });
+    toast({ title: `Segment ${segment.order} régénéré (${results.filter(Boolean).length} images)`, variant: "success" });
+  }
+
+  // Kept for compatibility — use handleRegenerateSegment in new UI
+  async function handleRegenerateImage(id: string) { await handleRegenerateSegment(id); }
+  function handleSegmentPromptChange(id: string, imagePrompt: string) {
+    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
   }
 
   async function handleAudioLoaded(url: string, duration: number, audioBuffer: AudioBuffer) {
@@ -658,11 +651,13 @@ export default function Home() {
           imageModel={imageModel}
           onImageModelChange={setImageModel}
           onGenerateAllImages={handleGenerateAllImages}
-          onRegenerateImage={handleRegenerateImage}
-          onGenerateImageVariation={handleGenerateImageVariation}
+          onRegenerateSegment={handleRegenerateSegment}
+          onRegenerateSlot={handleRegenerateSlot}
+          onImageCountChange={handleImageCountChange}
+          onSlotPromptChange={handleSlotPromptChange}
+          onSlotReferenceChange={handleSlotReferenceChange}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
-          onSegmentPromptChange={handleSegmentPromptChange}
           leonardoApiKey={config.leonardoApiKey}
           selectedVisualStyleId={selectedVisualStyleId}
           onSelectVisualStyle={handleSelectVisualStyle}

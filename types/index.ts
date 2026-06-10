@@ -20,6 +20,13 @@ export interface VisualStyle {
   createdAt: string;
 }
 
+export interface ImageSlot {
+  id: string;
+  prompt: string;
+  referenceImage?: string;
+  imageUrl?: string;
+}
+
 export interface VideoSegment {
   id: string;
   order: number;
@@ -31,6 +38,8 @@ export interface VideoSegment {
   imageUrls?: string[];
   isSceneVariation?: boolean;
   imagePrompt?: string;
+  imageSlots?: ImageSlot[];
+  imageCount?: number;
 }
 
 export interface ViralityScore {
