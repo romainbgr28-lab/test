@@ -339,17 +339,17 @@ export async function generateImageWithLeonardoV2(params: {
   }
 
   const generationId: string | undefined =
+    data?.generate?.generationId ??
     data?.sdGenerationJob?.generationId ??
     data?.generations_by_pk?.id ??
     data?.generationId ??
     data?.id ??
     data?.generation?.id;
   if (!generationId) {
-    throw new Error(
-      `Réponse inattendue de Leonardo (identifiant de génération manquant). Réponse brute : ${JSON.stringify(data)}`
-    );
+    throw new Error("Réponse inattendue de Leonardo (identifiant de génération manquant).");
   }
-  const apiCreditCost: number | undefined = data?.sdGenerationJob?.apiCreditCost ?? data?.apiCreditCost;
+  const apiCreditCost: number | undefined =
+    data?.generate?.apiCreditCost ?? data?.sdGenerationJob?.apiCreditCost ?? data?.apiCreditCost;
 
   const imageUrl = await pollGeneration(generationId, apiKey);
 
