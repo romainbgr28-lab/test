@@ -618,6 +618,9 @@ export default function Home() {
       {currentStep === 2 && (
         <StepVoice
           segments={segments}
+          scriptText={scriptText}
+          language={config.language}
+          googleTtsKey={config.googleTtsKey}
           voiceoverUrl={voiceoverUrl}
           audioDuration={audioDuration}
           onAudioLoaded={handleAudioLoaded}
