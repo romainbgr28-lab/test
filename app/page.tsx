@@ -26,6 +26,7 @@ import { uid } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, buildSubSegmentPrompts, getDimensionsForPlatform } from "@/lib/pollinations";
 import { syncSegmentsToAudio } from "@/lib/sync";
+import { detectPhrasesFromAudio, splitScriptIntoSentences, mapSentencesToPhrases } from "@/lib/audio-analysis";
 
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
@@ -419,29 +420,51 @@ export default function Home() {
     });
   }
 
-  async function handleAudioLoaded(url: string, duration: number) {
+  async function handleAudioLoaded(url: string, duration: number, audioBuffer: AudioBuffer) {
     setVoiceoverUrl(url);
     setAudioDuration(duration);
 
-    // Recalculate real segment durations from actual audio length
-    const synced = syncSegmentsToAudio(segments, duration);
-    setSegments(synced);
+    // Détecter les pauses naturelles dans l'audio pour connaître le timing EXACT de chaque phrase
+    const channelData = audioBuffer.getChannelData(0);
+    const detectedPhrases = detectPhrasesFromAudio(channelData, audioBuffer.sampleRate, duration);
 
-    // Build clips & subtitles immediately for preview later
-    const newClips = buildClipsFromSegments(synced, beatDuration);
+    // Découper le script en phrases et les caler sur les timestamps audio détectés
+    const sentences = splitScriptIntoSentences(scriptText);
+    const mappedPhrases = mapSentencesToPhrases(sentences, detectedPhrases);
+
+    // Créer les segments avec des durées EXACTES issues de l'analyse audio
+    const newSegments: VideoSegment[] = mappedPhrases.map((phrase, i) => ({
+      id: uid(),
+      order: i + 1,
+      narration: phrase.text,
+      visualDescription: "",
+      duration: Math.round((phrase.end - phrase.start) * 100) / 100,
+      imagePrompt: "",
+    }));
+
+    // Sous-titres avec timestamps exacts — chaque phrase commence et finit au bon moment
+    const exactSubtitles: SubtitleEntry[] = mappedPhrases.map((phrase) => ({
+      start: phrase.start,
+      end: phrase.end,
+      text: phrase.text,
+    }));
+
+    setSegments(newSegments);
+    setSubtitles(exactSubtitles);
+
+    // Construire les clips (1 image toutes les ~2.5s) en se basant sur l'audio
+    const newClips = buildClipsFromSegments(newSegments, beatDuration);
     const syncedClips = syncClipsToAudio(newClips, duration);
     setClips(syncedClips);
-    setSubtitles(generateSubtitlesFromClips(syncedClips));
 
-    // Now that we have real durations, generate image prompts
-    // so the correct number of images per segment is generated in the next step
+    // Générer les prompts d'images maintenant qu'on connaît les durées exactes
     setGeneratingPrompts(true);
     try {
-      const withPrompts = await generateImagePrompts(synced);
+      const withPrompts = await generateImagePrompts(newSegments);
       setSegments(withPrompts);
       toast({
-        title: "Audio synchronisé",
-        description: `${synced.length} segments calés sur ${duration.toFixed(1)}s. Prompts d'images prêts.`,
+        title: "Audio analysé",
+        description: `${detectedPhrases.length} phrases détectées sur ${duration.toFixed(1)}s. Prompts d'images générés.`,
         variant: "success",
       });
     } catch (error) {
@@ -619,7 +642,7 @@ export default function Home() {
         <StepVoice
           segments={segments}
           scriptText={scriptText}
-          language={config.language}
+          language={config.language as "fr" | "en"}
           googleTtsKey={config.googleTtsKey}
           voiceoverUrl={voiceoverUrl}
           audioDuration={audioDuration}

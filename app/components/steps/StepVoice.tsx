@@ -34,19 +34,19 @@ interface StepVoiceProps {
   googleTtsKey?: string;
   voiceoverUrl?: string;
   audioDuration: number;
-  onAudioLoaded: (url: string, duration: number) => void;
+  onAudioLoaded: (url: string, duration: number, audioBuffer: AudioBuffer) => void;
   generatingPrompts?: boolean;
   onProceed: () => void;
 }
 
-/** Détecte la durée audio avec AudioContext (précis même sur MP3 VBR). */
-async function getAccurateDuration(dataUrl: string): Promise<number> {
+/** Décode le fichier audio et retourne buffer + durée exacte. */
+async function decodeAudio(dataUrl: string): Promise<{ buffer: AudioBuffer; duration: number }> {
   const response = await fetch(dataUrl);
   const arrayBuffer = await response.arrayBuffer();
   const audioCtx = new AudioContext();
   try {
-    const decoded = await audioCtx.decodeAudioData(arrayBuffer);
-    return decoded.duration;
+    const buffer = await audioCtx.decodeAudioData(arrayBuffer);
+    return { buffer, duration: buffer.duration };
   } finally {
     await audioCtx.close();
   }
@@ -72,12 +72,12 @@ export function StepVoice({
   async function processAudioFile(dataUrl: string) {
     setError(null);
     try {
-      const duration = await getAccurateDuration(dataUrl);
+      const { buffer, duration } = await decodeAudio(dataUrl);
       if (!Number.isFinite(duration) || duration <= 0) {
         setError("Impossible de lire la durée de ce fichier audio.");
         return;
       }
-      onAudioLoaded(dataUrl, duration);
+      onAudioLoaded(dataUrl, duration, buffer);
     } catch {
       setError("Impossible de décoder ce fichier audio.");
     }
