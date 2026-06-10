@@ -29,6 +29,7 @@ interface StepImagesProps {
   onImageCountChange: (segId: string, count: number) => void;
   onSlotPromptChange: (segId: string, slotIdx: number, prompt: string) => void;
   onSlotReferenceChange: (segId: string, slotIdx: number, ref: string | undefined) => void;
+  onDeleteSlotImage: (segId: string, slotIdx: number) => void;
   generatingImages: boolean;
   imageLoadingIds: Set<string>;
   leonardoApiKey?: string;
@@ -51,11 +52,12 @@ interface SlotCardProps {
   onPromptChange: (v: string) => void;
   onReferenceChange: (ref: string | undefined) => void;
   onRegenerate: () => void;
+  onDeleteImage: () => void;
 }
 
 function SlotCard({
   segId, slotIdx, slotCount, prompt, referenceImage, imageUrl, loading,
-  onPromptChange, onReferenceChange, onRegenerate,
+  onPromptChange, onReferenceChange, onRegenerate, onDeleteImage,
 }: SlotCardProps) {
   const refInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -82,8 +84,18 @@ function SlotCard({
         {loading ? (
           <Skeleton className="h-full w-full" />
         ) : imageUrl ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img src={imageUrl} alt={`Image ${slotIdx + 1}`} className="h-full w-full object-cover" />
+          <>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={imageUrl} alt={`Image ${slotIdx + 1}`} className="h-full w-full object-cover" />
+            <button
+              type="button"
+              onClick={onDeleteImage}
+              className="absolute top-1 right-1 flex h-5 w-5 items-center justify-center rounded-full bg-black/70 text-white hover:bg-red-600 transition-colors"
+              title="Supprimer l'image"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </>
         ) : (
           <div className="flex h-full w-full items-center justify-center text-xs text-muted-foreground">
             {slotIdx + 1}
@@ -152,12 +164,13 @@ interface SegmentCardProps {
   onSlotReferenceChange: (slotIdx: number, ref: string | undefined) => void;
   onRegenerateSlot: (slotIdx: number) => void;
   onRegenerateSegment: () => void;
+  onDeleteSlotImage: (slotIdx: number) => void;
 }
 
 function SegmentCard({
   segment, imageLoadingIds,
   onImageCountChange, onSlotPromptChange, onSlotReferenceChange,
-  onRegenerateSlot, onRegenerateSegment,
+  onRegenerateSlot, onRegenerateSegment, onDeleteSlotImage,
 }: SegmentCardProps) {
   const slots = segment.imageSlots ?? [];
   const autoCount = Math.max(1, Math.ceil(segment.duration / 3));
@@ -248,6 +261,7 @@ function SegmentCard({
                 onPromptChange={(v) => onSlotPromptChange(i, v)}
                 onReferenceChange={(ref) => onSlotReferenceChange(i, ref)}
                 onRegenerate={() => onRegenerateSlot(i)}
+                onDeleteImage={() => onDeleteSlotImage(i)}
               />
             ))}
           </div>
@@ -266,7 +280,7 @@ function SegmentCard({
 export function StepImages({
   segments, imageModel, onImageModelChange,
   onGenerateAllImages, onRegenerateSegment, onRegenerateSlot,
-  onImageCountChange, onSlotPromptChange, onSlotReferenceChange,
+  onImageCountChange, onSlotPromptChange, onSlotReferenceChange, onDeleteSlotImage,
   generatingImages, imageLoadingIds,
   leonardoApiKey, selectedVisualStyleId, onSelectVisualStyle, selectedVisualStyle,
   onProceed,
@@ -356,6 +370,7 @@ export function StepImages({
               onSlotReferenceChange={(idx, ref) => onSlotReferenceChange(segment.id, idx, ref)}
               onRegenerateSlot={(idx) => onRegenerateSlot(segment.id, idx)}
               onRegenerateSegment={() => onRegenerateSegment(segment.id)}
+              onDeleteSlotImage={(idx) => onDeleteSlotImage(segment.id, idx)}
             />
           ))}
         </div>

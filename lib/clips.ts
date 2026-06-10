@@ -1,28 +1,28 @@
 import type { Clip, SubtitleEntry, VideoSegment } from "@/types";
 import { uid } from "./utils";
 
-export function buildClipsFromSegments(segments: VideoSegment[], beatDuration: number): Clip[] {
+export function buildClipsFromSegments(segments: VideoSegment[], _beatDuration: number): Clip[] {
   const clips: Clip[] = [];
   for (const segment of [...segments].sort((a, b) => a.order - b.order)) {
     const imgs: string[] =
       segment.imageUrls && segment.imageUrls.length > 0
         ? segment.imageUrls
         : [segment.imageBlob ?? segment.imageUrl ?? ""];
+    const count = imgs.length;
+    const baseDur = Math.round((segment.duration / count) * 10) / 10;
     let remaining = segment.duration;
-    let beatIndex = 0;
-    while (remaining > 0.05) {
-      const dur = Math.round(Math.min(beatDuration, remaining) * 10) / 10;
+    for (let i = 0; i < count; i++) {
+      const dur = Math.max(0.1, i === count - 1 ? Math.round(remaining * 10) / 10 : baseDur);
       clips.push({
         id: uid(),
         segmentId: segment.id,
         segmentOrder: segment.order,
-        beatIndex,
-        imageUrl: imgs[beatIndex % imgs.length] ?? "",
+        beatIndex: i,
+        imageUrl: imgs[i] ?? "",
         duration: dur,
         narration: segment.narration,
       });
-      remaining = Math.round((remaining - dur) * 10) / 10;
-      beatIndex++;
+      remaining = Math.round((remaining - baseDur) * 10) / 10;
     }
   }
   return clips;

@@ -386,6 +386,17 @@ export default function Home() {
     }
   }
 
+  function handleDeleteSlotImage(segId: string, slotIdx: number) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) => (i === slotIdx ? { ...slot, imageUrl: undefined } : slot));
+        const imageUrls = slots.map((sl) => sl.imageUrl).filter(Boolean) as string[];
+        return { ...s, imageSlots: slots, imageUrl: imageUrls[0], imageBlob: imageUrls[0], imageUrls };
+      })
+    );
+  }
+
   async function handleRegenerateSlot(segId: string, slotIdx: number) {
     const segment = segments.find((s) => s.id === segId);
     if (!segment) return;
@@ -656,6 +667,7 @@ export default function Home() {
           onImageCountChange={handleImageCountChange}
           onSlotPromptChange={handleSlotPromptChange}
           onSlotReferenceChange={handleSlotReferenceChange}
+          onDeleteSlotImage={handleDeleteSlotImage}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
           leonardoApiKey={config.leonardoApiKey}
