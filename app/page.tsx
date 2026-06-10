@@ -5,6 +5,7 @@ import { Wand2 } from "lucide-react";
 import type {
   Clip,
   ImageModel,
+  PublishMetadata,
   SubtitleEntry,
   VideoProject,
   VideoSegment,
