@@ -90,7 +90,7 @@ export function StepImages({
       <CardHeader>
         <CardTitle>Étape 3 — Images</CardTitle>
         <CardDescription>
-          Configure le style visuel puis génère, ajuste et régénère les images de chaque segment.
+          Les prompts ont été générés selon les durées réelles de l&apos;audio. Configure le style visuel puis génère les images.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
@@ -238,7 +238,7 @@ export function StepImages({
       <CardFooter>
         <Button onClick={onProceed} disabled={!canProceed} size="lg">
           <ArrowRight className="h-4 w-4" />
-          Passer à la voix off
+          Passer à l&apos;aperçu vidéo
         </Button>
       </CardFooter>
     </Card>

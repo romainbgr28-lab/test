@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { Upload, ArrowRight, Music } from "lucide-react";
+import { Upload, ArrowRight, Music, Loader2 } from "lucide-react";
 import type { VideoSegment } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
@@ -12,10 +12,11 @@ interface StepVoiceProps {
   voiceoverUrl?: string;
   audioDuration: number;
   onAudioLoaded: (url: string, duration: number) => void;
+  generatingPrompts?: boolean;
   onProceed: () => void;
 }
 
-export function StepVoice({ segments, voiceoverUrl, audioDuration, onAudioLoaded, onProceed }: StepVoiceProps) {
+export function StepVoice({ segments, voiceoverUrl, audioDuration, onAudioLoaded, generatingPrompts, onProceed }: StepVoiceProps) {
   const [dragging, setDragging] = React.useState(false);
   const inputRef = React.useRef<HTMLInputElement>(null);
 
@@ -55,9 +56,9 @@ export function StepVoice({ segments, voiceoverUrl, audioDuration, onAudioLoaded
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Étape 3 — Voix off</CardTitle>
+        <CardTitle>Étape 2 — Voix off</CardTitle>
         <CardDescription>
-          Uploade ta voix off enregistrée (MP3, WAV). La durée sera détectée et les segments synchronisés automatiquement.
+          Uploade ta voix off enregistrée (MP3, WAV). La durée réelle de chaque segment sera calculée, puis les prompts d&apos;images seront générés en conséquence.
         </CardDescription>
       </CardHeader>
       <CardContent>
@@ -111,15 +112,25 @@ export function StepVoice({ segments, voiceoverUrl, audioDuration, onAudioLoaded
                   <span className="font-medium text-foreground">{segments.length} segments</span> synchronisés
                   proportionnellement sur {audioDuration.toFixed(1)}s
                 </p>
+                {generatingPrompts && (
+                  <p className="flex items-center gap-2 text-sm text-primary">
+                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    Génération des prompts d&apos;images en cours…
+                  </p>
+                )}
               </div>
             )}
           </CardContent>
         </Card>
       </CardContent>
       <CardFooter>
-        <Button onClick={onProceed} size="lg">
-          <ArrowRight className="h-4 w-4" />
-          {voiceoverUrl ? "Voir l'aperçu vidéo" : "Continuer sans audio"}
+        <Button onClick={onProceed} disabled={generatingPrompts} size="lg">
+          {generatingPrompts ? (
+            <Loader2 className="h-4 w-4 animate-spin" />
+          ) : (
+            <ArrowRight className="h-4 w-4" />
+          )}
+          {voiceoverUrl ? "Passer aux images" : "Continuer sans audio"}
         </Button>
       </CardFooter>
     </Card>

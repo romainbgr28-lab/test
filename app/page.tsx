@@ -30,8 +30,8 @@ import { syncSegmentsToAudio } from "@/lib/sync";
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
   { index: 1, title: "Script" },
-  { index: 2, title: "Images" },
-  { index: 3, title: "Voix off" },
+  { index: 2, title: "Voix off" },
+  { index: 3, title: "Images" },
   { index: 4, title: "Aperçu" },
   { index: 5, title: "Export" },
 ];
@@ -77,6 +77,7 @@ export default function Home() {
   const [subtitles, setSubtitles] = React.useState<SubtitleEntry[]>([]);
   const [clips, setClips] = React.useState<Clip[]>([]);
   const [beatDuration, setBeatDuration] = React.useState(2.5);
+  const [generatingPrompts, setGeneratingPrompts] = React.useState(false);
 
   const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
   const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
@@ -193,41 +194,25 @@ export default function Home() {
     try {
       const words = scriptText.trim().split(/\s+/).length;
       const estimatedDuration = words / 2.5;
-      const imageCount = Math.max(1, Math.ceil(estimatedDuration / 2.5));
-      const chunkDuration = estimatedDuration / imageCount;
+      const segmentCount = Math.max(1, Math.ceil(estimatedDuration / 3));
+      const chunkDuration = estimatedDuration / segmentCount;
 
-      const response = await fetch("/api/generate-image-prompts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          scriptText,
-          imageCount,
-          platform: config.platform,
-          language: config.language,
-          model: config.mistralModel,
-          apiKey: config.mistralApiKey || undefined,
-          stylePrompt: selectedVisualStyle?.stylePrompt || undefined,
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des prompts d'images.");
-      const prompts = data.prompts as string[];
-
-      // Split script text into imageCount chunks
+      // Split script into segments without generating image prompts yet
+      // (prompts are generated AFTER audio is loaded so durations are accurate)
       const lines = scriptText.split("\n").filter((l) => l.trim());
       const chunksText: string[] = [];
-      const linesPerChunk = Math.ceil(lines.length / imageCount);
-      for (let i = 0; i < imageCount; i++) {
+      const linesPerChunk = Math.ceil(lines.length / segmentCount);
+      for (let i = 0; i < segmentCount; i++) {
         chunksText.push(lines.slice(i * linesPerChunk, (i + 1) * linesPerChunk).join(" ").trim() || scriptText);
       }
 
-      const newSegments: VideoSegment[] = prompts.map((prompt, i) => ({
+      const newSegments: VideoSegment[] = chunksText.map((narration, i) => ({
         id: uid(),
         order: i + 1,
-        narration: chunksText[i] ?? "",
-        visualDescription: prompt,
-        duration: Math.round(chunkDuration),
-        imagePrompt: prompt,
+        narration,
+        visualDescription: "",
+        duration: Math.round(chunkDuration * 10) / 10,
+        imagePrompt: "",
       }));
 
       setSegments(newSegments);
@@ -236,7 +221,7 @@ export default function Home() {
       setUnlockedStep((u) => Math.max(u, 2));
       toast({
         title: "Script validé !",
-        description: `${imageCount} prompts d'images générés. Passe à la génération des visuels.`,
+        description: `${segmentCount} segments créés. Charge ta voix off pour caler les durées.`,
         variant: "success",
       });
     } catch (error) {
@@ -245,6 +230,38 @@ export default function Home() {
     } finally {
       setValidatingScript(false);
     }
+  }
+
+  async function generateImagePrompts(syncedSegments: VideoSegment[]): Promise<VideoSegment[]> {
+    const imageCount = syncedSegments.length;
+    const scriptText = syncedSegments
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .map((s) => s.narration)
+      .join("\n");
+
+    const response = await fetch("/api/generate-image-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scriptText,
+        imageCount,
+        platform: config.platform,
+        language: config.language,
+        model: config.mistralModel,
+        apiKey: config.mistralApiKey || undefined,
+        stylePrompt: selectedVisualStyle?.stylePrompt || undefined,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des prompts d'images.");
+    const prompts = data.prompts as string[];
+
+    return syncedSegments.map((seg, i) => ({
+      ...seg,
+      visualDescription: prompts[i] ?? seg.visualDescription,
+      imagePrompt: prompts[i] ?? seg.imagePrompt,
+    }));
   }
 
   function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean; referenceImages?: string[] } {
@@ -402,23 +419,40 @@ export default function Home() {
     });
   }
 
-  function handleAudioLoaded(url: string, duration: number) {
+  async function handleAudioLoaded(url: string, duration: number) {
     setVoiceoverUrl(url);
     setAudioDuration(duration);
+
+    // Recalculate real segment durations from actual audio length
     const synced = syncSegmentsToAudio(segments, duration);
     setSegments(synced);
+
+    // Build clips & subtitles immediately for preview later
     const newClips = buildClipsFromSegments(synced, beatDuration);
     const syncedClips = syncClipsToAudio(newClips, duration);
     setClips(syncedClips);
     setSubtitles(generateSubtitlesFromClips(syncedClips));
-    toast({
-      title: "Audio synchronisé",
-      description: `${syncedClips.length} clips sur ${duration.toFixed(1)}s, sous-titres générés.`,
-      variant: "success",
-    });
+
+    // Now that we have real durations, generate image prompts
+    // so the correct number of images per segment is generated in the next step
+    setGeneratingPrompts(true);
+    try {
+      const withPrompts = await generateImagePrompts(synced);
+      setSegments(withPrompts);
+      toast({
+        title: "Audio synchronisé",
+        description: `${synced.length} segments calés sur ${duration.toFixed(1)}s. Prompts d'images prêts.`,
+        variant: "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec des prompts d'images", description: message, variant: "error" });
+    } finally {
+      setGeneratingPrompts(false);
+    }
   }
 
-  function handleProceedToVoice() {
+  function handleProceedToImages() {
     setCurrentStep(3);
     setUnlockedStep((u) => Math.max(u, 3));
   }
@@ -432,6 +466,12 @@ export default function Home() {
     }
     setCurrentStep(4);
     setUnlockedStep((u) => Math.max(u, 4));
+  }
+
+  function handleProceedToVoice() {
+    // Legacy: kept for compatibility but not used in main flow anymore
+    setCurrentStep(2);
+    setUnlockedStep((u) => Math.max(u, 2));
   }
 
   function handleClipDurationChange(id: string, duration: number) {
@@ -576,6 +616,17 @@ export default function Home() {
       )}
 
       {currentStep === 2 && (
+        <StepVoice
+          segments={segments}
+          voiceoverUrl={voiceoverUrl}
+          audioDuration={audioDuration}
+          onAudioLoaded={handleAudioLoaded}
+          generatingPrompts={generatingPrompts}
+          onProceed={handleProceedToImages}
+        />
+      )}
+
+      {currentStep === 3 && (
         <StepImages
           segments={segments}
           imageModel={imageModel}
@@ -590,16 +641,6 @@ export default function Home() {
           selectedVisualStyleId={selectedVisualStyleId}
           onSelectVisualStyle={handleSelectVisualStyle}
           selectedVisualStyle={selectedVisualStyle}
-          onProceed={handleProceedToVoice}
-        />
-      )}
-
-      {currentStep === 3 && (
-        <StepVoice
-          segments={segments}
-          voiceoverUrl={voiceoverUrl}
-          audioDuration={audioDuration}
-          onAudioLoaded={handleAudioLoaded}
           onProceed={handleProceedToPreview}
         />
       )}
