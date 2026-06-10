@@ -342,9 +342,12 @@ export async function generateImageWithLeonardoV2(params: {
     data?.sdGenerationJob?.generationId ??
     data?.generations_by_pk?.id ??
     data?.generationId ??
-    data?.id;
+    data?.id ??
+    data?.generation?.id;
   if (!generationId) {
-    throw new Error("Réponse inattendue de Leonardo (identifiant de génération manquant).");
+    throw new Error(
+      `Réponse inattendue de Leonardo (identifiant de génération manquant). Réponse brute : ${JSON.stringify(data)}`
+    );
   }
   const apiCreditCost: number | undefined = data?.sdGenerationJob?.apiCreditCost ?? data?.apiCreditCost;
 
