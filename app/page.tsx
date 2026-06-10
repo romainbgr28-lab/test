@@ -4,14 +4,8 @@ import * as React from "react";
 import { Wand2 } from "lucide-react";
 import type {
   Clip,
-  HookVariant,
   ImageModel,
   SubtitleEntry,
-  Language,
-  MistralModel,
-  NicheProfile,
-  Platform,
-  PublishMetadata,
   VideoProject,
   VideoSegment,
   ViralityScore,
@@ -41,22 +35,6 @@ const STEPS: StepDefinition[] = [
   { index: 5, title: "Export" },
 ];
 
-interface RawSegment {
-  order: number;
-  narration: string;
-  visualDescription: string;
-  duration: number;
-}
-
-function toSegment(raw: RawSegment): VideoSegment {
-  return {
-    id: uid(),
-    order: raw.order,
-    narration: raw.narration,
-    visualDescription: raw.visualDescription,
-    duration: raw.duration,
-  };
-}
 
 export default function Home() {
   const { toast } = useToast();
@@ -81,12 +59,11 @@ export default function Home() {
   const [generatingScript, setGeneratingScript] = React.useState(false);
   const [scriptProgress, setScriptProgress] = React.useState<{ message: string; score?: number }[]>([]);
   const [viralityScore, setViralityScore] = React.useState<ViralityScore | null>(null);
+  const [scriptText, setScriptText] = React.useState("");
   const [segments, setSegments] = React.useState<VideoSegment[]>([]);
-  const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
+  const [validatingScript, setValidatingScript] = React.useState(false);
   const [researchSources, setResearchSources] = React.useState<string[]>([]);
-  const [hookVariants, setHookVariants] = React.useState<HookVariant[]>([]);
-  const [generatingHooks, setGeneratingHooks] = React.useState(false);
 
   const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
@@ -112,7 +89,7 @@ export default function Home() {
     segmentCount: segments.length || 0,
   });
 
-  const scriptCharCount = segments.reduce((acc, s) => acc + s.narration.length, 0);
+  const scriptCharCount = scriptText.length;
   const voiceCost = estimateVoiceCost(scriptCharCount);
 
   function updateConfig(patch: Partial<StepConfigState>) {
@@ -128,10 +105,10 @@ export default function Home() {
     setGeneratingScript(true);
     setViralityScore(null);
     setSegments([]);
+    setScriptText("");
     setScriptValidated(false);
     setScriptProgress([]);
     setResearchSources([]);
-    setHookVariants([]);
     setUnlockedStep((u) => Math.max(u, 1));
     setCurrentStep(1);
     try {
@@ -159,7 +136,7 @@ export default function Home() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let result: { viralityScore: ViralityScore; segments: RawSegment[] } | null = null;
+      let result: { viralityScore: ViralityScore; script: string } | null = null;
       let streamError: string | null = null;
 
       while (true) {
@@ -179,14 +156,14 @@ export default function Home() {
             score?: number;
             sources?: string[];
             viralityScore?: ViralityScore;
-            segments?: RawSegment[];
+            script?: string;
           };
           if (event.type === "sources" && Array.isArray(event.sources)) {
             setResearchSources(event.sources);
           } else if (event.type === "status" && event.message) {
             setScriptProgress((prev) => [...prev, { message: event.message!, score: event.score }]);
-          } else if (event.type === "result" && event.viralityScore && event.segments) {
-            result = { viralityScore: event.viralityScore, segments: event.segments };
+          } else if (event.type === "result" && event.viralityScore && event.script) {
+            result = { viralityScore: event.viralityScore, script: event.script };
           } else if (event.type === "error" && event.message) {
             streamError = event.message;
           }
@@ -197,10 +174,10 @@ export default function Home() {
       if (!result) throw new Error("Aucun script n'a été généré.");
 
       setViralityScore(result.viralityScore);
-      setSegments(result.segments.map(toSegment));
+      setScriptText(result.script);
       setCurrentStep(1);
       setUnlockedStep((u) => Math.max(u, 1));
-      toast({ title: "Script généré !", description: "Relis et ajuste les segments avant de valider.", variant: "success" });
+      toast({ title: "Script généré !", description: "Relis et modifie le script, puis valide.", variant: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
       toast({ title: "Échec de la génération du script", description: message, variant: "error" });
@@ -209,95 +186,64 @@ export default function Home() {
     }
   }
 
-  function handleSegmentChange(id: string, patch: Partial<VideoSegment>) {
-    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
-  }
-
-  async function handleRegenerateSegment(id: string) {
-    if (!config.profile) return;
-    const segment = segments.find((s) => s.id === id);
-    if (!segment) return;
-    setRegeneratingSegmentId(id);
+  async function handleValidateScript() {
+    if (!scriptText.trim()) return;
+    setValidatingScript(true);
     try {
-      const response = await fetch("/api/generate-script", {
+      const words = scriptText.trim().split(/\s+/).length;
+      const estimatedDuration = words / 2.5;
+      const imageCount = Math.max(1, Math.ceil(estimatedDuration / 2.5));
+      const chunkDuration = estimatedDuration / imageCount;
+
+      const response = await fetch("/api/generate-image-prompts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          subject: config.subject,
-          platform: config.platform,
-          language: config.language,
-          scriptInstructions: config.profile.scriptInstructions,
-          viralityInstructions: config.profile.viralityInstructions || undefined,
-          duration: config.duration,
-          model: config.mistralModel,
-          apiKey: config.mistralApiKey || undefined,
-          regenerateSegmentOrder: segment.order,
-          existingSegment: {
-            order: segment.order,
-            narration: segment.narration,
-            visualDescription: segment.visualDescription,
-            duration: segment.duration,
-          },
-        }),
-      });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la régénération du segment.");
-      const raw = data.segment as RawSegment;
-      handleSegmentChange(id, {
-        narration: raw.narration,
-        visualDescription: raw.visualDescription,
-        duration: raw.duration,
-      });
-      toast({ title: `Segment ${segment.order} régénéré`, variant: "success" });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: "Échec de la régénération", description: message, variant: "error" });
-    } finally {
-      setRegeneratingSegmentId(null);
-    }
-  }
-
-  async function handleGenerateHooks() {
-    const hookSegment = [...segments].sort((a, b) => a.order - b.order)[0];
-    if (!hookSegment) return;
-    setGeneratingHooks(true);
-    try {
-      const response = await fetch("/api/generate-hooks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: config.subject,
-          currentHook: hookSegment.narration,
+          scriptText,
+          imageCount,
           platform: config.platform,
           language: config.language,
           model: config.mistralModel,
           apiKey: config.mistralApiKey || undefined,
+          stylePrompt: selectedVisualStyle?.stylePrompt || undefined,
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des hooks.");
-      setHookVariants(data.variants as HookVariant[]);
+      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des prompts d'images.");
+      const prompts = data.prompts as string[];
+
+      // Split script text into imageCount chunks
+      const lines = scriptText.split("\n").filter((l) => l.trim());
+      const chunksText: string[] = [];
+      const linesPerChunk = Math.ceil(lines.length / imageCount);
+      for (let i = 0; i < imageCount; i++) {
+        chunksText.push(lines.slice(i * linesPerChunk, (i + 1) * linesPerChunk).join(" ").trim() || scriptText);
+      }
+
+      const newSegments: VideoSegment[] = prompts.map((prompt, i) => ({
+        id: uid(),
+        order: i + 1,
+        narration: chunksText[i] ?? "",
+        visualDescription: prompt,
+        duration: Math.round(chunkDuration),
+        imagePrompt: prompt,
+      }));
+
+      setSegments(newSegments);
+      setScriptValidated(true);
+      setCurrentStep(2);
+      setUnlockedStep((u) => Math.max(u, 2));
+      toast({
+        title: "Script validé !",
+        description: `${imageCount} prompts d'images générés. Passe à la génération des visuels.`,
+        variant: "success",
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: "Échec de la génération des hooks", description: message, variant: "error" });
+      toast({ title: "Échec de la validation", description: message, variant: "error" });
     } finally {
-      setGeneratingHooks(false);
+      setValidatingScript(false);
     }
-  }
-
-  function handleApplyHook(narration: string) {
-    const hookSegment = [...segments].sort((a, b) => a.order - b.order)[0];
-    if (!hookSegment) return;
-    handleSegmentChange(hookSegment.id, { narration });
-    setHookVariants([]);
-    toast({ title: "Hook remplacé", description: "Le segment 1 utilise la nouvelle accroche.", variant: "success" });
-  }
-
-  function handleValidateScript() {
-    setScriptValidated(true);
-    setCurrentStep(2);
-    setUnlockedStep((u) => Math.max(u, 2));
-    toast({ title: "Script validé", description: "Passe à la génération des assets.", variant: "success" });
   }
 
   function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean; referenceImages?: string[] } {
@@ -618,18 +564,13 @@ export default function Home() {
           loading={generatingScript}
           progress={scriptProgress}
           viralityScore={viralityScore}
-          segments={segments}
-          onSegmentChange={handleSegmentChange}
-          onRegenerateSegment={handleRegenerateSegment}
-          regeneratingSegmentId={regeneratingSegmentId}
+          scriptText={scriptText}
+          onScriptChange={setScriptText}
           onValidate={handleValidateScript}
+          validating={validatingScript}
           validated={scriptValidated}
           sources={researchSources}
           targetDuration={config.duration}
-          hookVariants={hookVariants}
-          generatingHooks={generatingHooks}
-          onGenerateHooks={handleGenerateHooks}
-          onApplyHook={handleApplyHook}
         />
       )}
 

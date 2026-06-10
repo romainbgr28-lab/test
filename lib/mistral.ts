@@ -37,27 +37,18 @@ PRINCIPES PSYCHOLOGIQUES QUE TU APPLIQUES SYSTÉMATIQUEMENT :
 - Micro-engagements : poser des questions auxquelles le spectateur répond mentalement "oui" pour créer une validation continue
 
 STRUCTURE OBLIGATOIRE POUR ${params.duration} SECONDES :
-- Segment 1 (3s max) : Hook. Une phrase choc. Chiffre, question provocante ou affirmation contre-intuitive. Jamais plus de 15 mots.
-- Segments 2 à N-1 : Corps. Chaque segment = une idée, une preuve, une révélation. Durée : 6 à 8 secondes chacun. Créer un micro-cliffhanger à la fin de chaque segment.
-- Dernier segment (5s) : CTA. Direct, simple, une seule action demandée.
+- Ligne 1 (hook) : Une phrase choc. Chiffre, question provocante ou affirmation contre-intuitive. Jamais plus de 15 mots.
+- Corps : Chaque phrase = une idée, une preuve, une révélation. Créer un micro-cliffhanger toutes les 2-3 phrases.
+- Dernière ligne (CTA) : Direct, simple, une seule action demandée.
 
-CALCUL OBLIGATOIRE : Pour ${params.duration} secondes tu DOIS générer exactement le nombre de segments nécessaires pour atteindre cette durée.
-Exemple : 60 secondes = hook 3s + 7 segments de 7s + CTA 5s = 9 segments minimum.
-Exemple : 90 secondes = hook 3s + 11 segments de 7s + CTA 5s = 13 segments minimum.
-Ne génère JAMAIS moins de segments que nécessaire. Compte les secondes avant de répondre.
+CALCUL OBLIGATOIRE : Pour ${params.duration} secondes à 2,5 mots par seconde = environ ${Math.round(params.duration * 2.5)} mots au total. Compte les mots avant de répondre. Ne génère pas moins.
 
 RÈGLES DE NARRATION :
 - Phrases courtes. Maximum 20 mots par phrase.
 - Rythme TikTok : une idée = une phrase = une respiration
 - Utiliser "tu" pas "vous"
 - Jamais de transition molle ("ensuite", "puis", "donc"). Transitions chocs : "Mais voilà le truc.", "Et c'est là que ça devient fou.", "La plupart des gens ignorent ça."
-- Chaque narration doit pouvoir se lire en exactement {segment_duration} secondes à voix haute (environ 2,5 mots par seconde)
-
-RÈGLES VISUELLES :
-- La description visuelle doit être en anglais, très précise, style prompt Midjourney
-- Spécifier : sujet principal, éclairage, couleurs dominantes, style (cinématique, minimaliste, etc.), émotion recherchée
-- Les visuels doivent RENFORCER la narration, pas juste l'illustrer
-- Varier les types de plans : close-up, wide shot, abstract, data visualization, metaphor visuelle
+- Environ 2,5 mots par seconde à voix haute
 
 RÈGLE ABSOLUE SUR LES FAITS :
 Une NOTE DE RECHERCHE te sera fournie avec des faits, chiffres et informations réelles et vérifiées.
@@ -81,14 +72,7 @@ FORMAT DE RÉPONSE : JSON strict uniquement, aucun texte avant ou après.
     "ctaClarity": "[analyse en 1 phrase]",
     "suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"]
   },
-  "segments": [
-    {
-      "order": 1,
-      "narration": "[texte exact à lire]",
-      "visualDescription": "[prompt visuel en anglais]",
-      "duration": [durée en secondes, entier]
-    }
-  ]
+  "script": "[texte complet du script à lire, en une seule chaîne de caractères. Chaque phrase sur une nouvelle ligne (\\n). Ne pas inclure de balises ou de marqueurs de segment.]"
 }`;
 }
 

@@ -1,11 +1,11 @@
 "use client";
 
 import * as React from "react";
-import { AlertTriangle, CheckCircle2, ExternalLink, Lightbulb, Loader2, Search, TrendingUp, Zap } from "lucide-react";
-import type { HookVariant, ViralityScore, VideoSegment } from "@/types";
+import { AlertTriangle, CheckCircle2, ExternalLink, Lightbulb, Loader2, Search, TrendingUp } from "lucide-react";
+import type { ViralityScore } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
-import { SegmentCard } from "../ui/SegmentCard";
 import { Button } from "../ui/Button";
+import { Textarea } from "../ui/Textarea";
 import { Skeleton } from "../ui/Skeleton";
 import { cn } from "@/lib/utils";
 
@@ -13,18 +13,13 @@ interface StepScriptProps {
   loading: boolean;
   progress?: { message: string; score?: number }[];
   viralityScore: ViralityScore | null;
-  segments: VideoSegment[];
-  onSegmentChange: (id: string, patch: Partial<VideoSegment>) => void;
-  onRegenerateSegment: (id: string) => void;
-  regeneratingSegmentId: string | null;
+  scriptText: string;
+  onScriptChange: (text: string) => void;
   onValidate: () => void;
+  validating: boolean;
   validated: boolean;
   sources?: string[];
   targetDuration: number;
-  hookVariants: HookVariant[];
-  generatingHooks: boolean;
-  onGenerateHooks: () => void;
-  onApplyHook: (narration: string) => void;
 }
 
 function scoreColor(score: number): string {
@@ -156,20 +151,16 @@ export function StepScript({
   loading,
   progress = [],
   viralityScore,
-  segments,
-  onSegmentChange,
-  onRegenerateSegment,
-  regeneratingSegmentId,
+  scriptText,
+  onScriptChange,
   onValidate,
+  validating,
   validated,
   sources = [],
   targetDuration,
-  hookVariants,
-  generatingHooks,
-  onGenerateHooks,
-  onApplyHook,
 }: StepScriptProps) {
-  const totalDuration = segments.reduce((sum, s) => sum + (Number(s.duration) || 0), 0);
+  const wordCount = scriptText.trim() ? scriptText.trim().split(/\s+/).length : 0;
+  const estimatedDuration = Math.round(wordCount / 2.5);
 
   if (loading) {
     return (
@@ -183,14 +174,13 @@ export function StepScript({
         <CardContent className="flex flex-col gap-4">
           <LiveProgressLog entries={progress} loading={loading} />
           <Skeleton className="h-28 w-full" />
-          <Skeleton className="h-40 w-full" />
-          <Skeleton className="h-40 w-full" />
+          <Skeleton className="h-64 w-full" />
         </CardContent>
       </Card>
     );
   }
 
-  if (!viralityScore && segments.length === 0) {
+  if (!viralityScore && !scriptText) {
     return (
       <Card>
         <CardHeader>
@@ -206,7 +196,7 @@ export function StepScript({
       <CardHeader>
         <CardTitle>Étape 2 — Script</CardTitle>
         <CardDescription>
-          Relis et ajuste chaque segment, puis valide le script pour passer à la génération des assets.
+          Relis et modifie librement le script, puis valide pour générer automatiquement les prompts d'images.
         </CardDescription>
       </CardHeader>
       <CardContent className="flex flex-col gap-6">
@@ -282,70 +272,52 @@ export function StepScript({
           </div>
         )}
 
-        {/* Garde-fou durée : YouTube Shorts coupe à 60s, TikTok pénalise les vidéos non finies */}
-        {targetDuration > 0 && Math.abs(totalDuration - targetDuration) > targetDuration * 0.1 && (
+        {targetDuration > 0 && estimatedDuration > 0 && Math.abs(estimatedDuration - targetDuration) > targetDuration * 0.15 && (
           <div className="flex items-start gap-2 rounded-md border border-amber-700/40 bg-amber-500/10 p-3 text-sm text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>
-              Le script fait {totalDuration}s pour une cible de {targetDuration}s.
-              {totalDuration > targetDuration
-                ? " Au-delà de 60s, YouTube Shorts coupe la vidéo et la rétention chute : raccourcis ou régénère des segments."
-                : " Trop court : ajoute du contenu pour exploiter toute la durée monétisable."}
+              Le script fait environ {estimatedDuration}s pour une cible de {targetDuration}s.
+              {estimatedDuration > targetDuration
+                ? " Trop long : raccourcis ou retire quelques phrases."
+                : " Trop court : ajoute du contenu pour exploiter toute la durée."}
             </span>
           </div>
         )}
 
-        {/* A/B testing du hook : les 3 premières secondes décident de la rétention */}
-        <div className="flex flex-col gap-2 rounded-md border border-border bg-secondary/20 p-4">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-              <Zap className="h-3.5 w-3.5" />
-              Hook (3 premières secondes) — teste des variantes
-            </p>
-            <Button variant="outline" size="sm" onClick={onGenerateHooks} disabled={generatingHooks || segments.length === 0}>
-              {generatingHooks ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Zap className="h-3.5 w-3.5" />}
-              Générer 3 hooks alternatifs
-            </Button>
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <label className="text-sm font-semibold">Script</label>
+            <span className="text-xs text-muted-foreground">
+              ~{wordCount} mots · ~{estimatedDuration}s estimées
+            </span>
           </div>
-          {hookVariants.length > 0 && (
-            <div className="flex flex-col gap-2">
-              {hookVariants.map((variant, i) => (
-                <button
-                  key={i}
-                  type="button"
-                  onClick={() => onApplyHook(variant.narration)}
-                  className="flex flex-col gap-0.5 rounded-md border border-border bg-card p-3 text-left transition-colors hover:border-primary/60"
-                >
-                  <span className="text-sm">« {variant.narration} »</span>
-                  {variant.style && <span className="text-xs text-muted-foreground">Mécanique : {variant.style}</span>}
-                </button>
-              ))}
-              <p className="text-xs text-muted-foreground">Clique sur une variante pour remplacer le hook du segment 1.</p>
-            </div>
-          )}
-        </div>
-
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Segments du script</h3>
-          <span className="text-sm text-muted-foreground">Durée totale : {totalDuration}s</span>
-        </div>
-
-        <div className="flex flex-col gap-4">
-          {segments.map((segment) => (
-            <SegmentCard
-              key={segment.id}
-              segment={segment}
-              onChange={(patch) => onSegmentChange(segment.id, patch)}
-              onRegenerate={() => onRegenerateSegment(segment.id)}
-              regenerating={regeneratingSegmentId === segment.id}
-            />
-          ))}
+          <Textarea
+            value={scriptText}
+            onChange={(e) => onScriptChange(e.target.value)}
+            className="min-h-[400px] text-sm leading-relaxed"
+            placeholder="Le script apparaîtra ici..."
+            disabled={validated && !validating}
+          />
+          <p className="text-xs text-muted-foreground">
+            Modifie librement le texte. À la validation, les prompts d'images seront générés automatiquement (1 image toutes les 2-3 secondes).
+          </p>
         </div>
       </CardContent>
       <CardFooter>
-        <Button onClick={onValidate} size="lg" disabled={segments.length === 0}>
-          {validated ? <CheckCircle2 className="h-4 w-4" /> : <Loader2 className="hidden h-4 w-4 animate-spin" />}
-          Valider le script
+        <Button onClick={onValidate} size="lg" disabled={!scriptText.trim() || validating}>
+          {validating ? (
+            <>
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Génération des prompts d'images...
+            </>
+          ) : validated ? (
+            <>
+              <CheckCircle2 className="h-4 w-4" />
+              Script validé
+            </>
+          ) : (
+            "Valider le script et générer les images"
+          )}
         </Button>
       </CardFooter>
     </Card>

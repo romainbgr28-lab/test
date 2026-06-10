@@ -10,16 +10,9 @@ import type { Language, Platform, ViralityScore } from "@/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface RawSegment {
-  order: number;
-  narration: string;
-  visualDescription: string;
-  duration: number;
-}
-
 interface ScriptResponse {
   viralityScore: ViralityScore;
-  segments: RawSegment[];
+  script: string;
 }
 
 const MAX_ITERATIONS = 4;
@@ -87,8 +80,6 @@ export async function POST(request: Request) {
     duration,
     model,
     apiKey,
-    regenerateSegmentOrder,
-    existingSegment,
   } = body as {
     subject: string;
     sourceContent?: string;
@@ -99,8 +90,6 @@ export async function POST(request: Request) {
     duration: number;
     model: string;
     apiKey?: string;
-    regenerateSegmentOrder?: number;
-    existingSegment?: RawSegment;
   };
 
   const key = apiKey || process.env.MISTRAL_API_KEY;
@@ -116,35 +105,6 @@ export async function POST(request: Request) {
   }
 
   const systemPrompt = buildScriptSystemPrompt({ platform, language, scriptInstructions, viralityInstructions, duration, subject });
-
-  // Régénération d'un segment unique : pas de recherche web ni de boucle, réponse JSON classique.
-  if (regenerateSegmentOrder && existingSegment) {
-    try {
-      const userPrompt = `Régénère uniquement le segment numéro ${regenerateSegmentOrder} de ce script (sujet global : "${subject}"). Voici le segment actuel à améliorer :
-Narration : ${existingSegment.narration}
-Description visuelle : ${existingSegment.visualDescription}
-Durée : ${existingSegment.duration}s
-
-Renvoie un unique objet JSON pour ce segment au format :
-{ "order": ${regenerateSegmentOrder}, "narration": "...", "visualDescription": "...", "duration": ${existingSegment.duration} }
-Aucun texte avant ou après le JSON.`;
-
-      const raw = await callMistralChat({
-        apiKey: key,
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      const segment = extractJson<RawSegment>(raw);
-      return NextResponse.json({ segment });
-    } catch (error) {
-      console.error("Erreur /api/generate-script (régénération segment) :", error);
-      const message = error instanceof Error ? error.message : "Erreur inconnue";
-      return NextResponse.json({ error: `Échec de la régénération du segment : ${message}` }, { status: 500 });
-    }
-  }
 
   const platformLabel = PLATFORM_LABELS[platform];
   const languageLabel = LANGUAGE_LABELS[language];
@@ -237,7 +197,11 @@ Rédige le script complet en t'appuyant sur ces informations : intègre les chif
 - Clarté du CTA : ${previous!.viralityScore.ctaClarity}
 - Suggestions à appliquer impérativement : ${previous!.viralityScore.suggestions.join(" / ")}
 ${briefBlock}
-Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles, en continuant de t'appuyer sur les informations factuelles ci-dessus. Ne te contente pas de reformuler : approfondis, muscle chaque segment et vise un score de 100/100. Réponds uniquement avec le JSON demandé.`;
+Voici le script précédent :
+"""
+${previous!.script}
+"""
+Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles, en continuant de t'appuyer sur les informations factuelles ci-dessus. Ne te contente pas de reformuler : approfondis, muscle le script et vise un score de 100/100. Réponds uniquement avec le JSON demandé.`;
           }
 
           const rawText = await withHeartbeat(
@@ -256,7 +220,7 @@ Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles,
           send({ type: "status", iteration, message: "Analyse du script et calcul du score de viralité..." });
 
           const parsed = extractJson<ScriptResponse>(rawText);
-          if (!parsed.segments || !Array.isArray(parsed.segments) || parsed.segments.length === 0) {
+          if (!parsed.script || typeof parsed.script !== "string" || parsed.script.trim().length === 0) {
             throw new Error("Le script généré est invalide. Réessaie.");
           }
 
@@ -293,7 +257,7 @@ Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles,
         }
 
         send({ type: "status", message: "Script finalisé !" });
-        send({ type: "result", viralityScore: best.viralityScore, segments: best.segments });
+        send({ type: "result", viralityScore: best.viralityScore, script: best.script });
       } catch (error) {
         console.error("Erreur /api/generate-script :", error);
         const message = error instanceof Error ? error.message : "Erreur inconnue";
