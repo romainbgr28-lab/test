@@ -67,7 +67,7 @@ function SlotCard({
 }: SlotCardProps) {
   const refInputRef = React.useRef<HTMLInputElement>(null);
   const [showAnimForm, setShowAnimForm] = React.useState(false);
-  const [animModel, setAnimModel] = React.useState<VideoModelId>("VEO3_1FAST");
+  const [animModel, setAnimModel] = React.useState<VideoModelId>("VEO");
   const [animPrompt, setAnimPrompt] = React.useState("");
   const [animStrength, setAnimStrength] = React.useState(4);
 

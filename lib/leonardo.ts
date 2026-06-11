@@ -219,9 +219,8 @@ export interface LeonardoVideoResult {
 }
 
 export const VIDEO_MODELS = [
-  { id: "SVD", name: "SVD Motion", description: "Stable Video Diffusion — fluide, sans prompt" },
-  { id: "VEO3_1", name: "VEO 3 (qualité)", description: "Google VEO 3 — animation dirigée par prompt, haute qualité" },
-  { id: "VEO3_1FAST", name: "VEO 3 Fast (rapide)", description: "Google VEO 3 Fast — prompt, moins cher et plus rapide" },
+  { id: "SVD", name: "SVD Motion", description: "Stable Video Diffusion — animation fluide, contrôlée par intensité (sans prompt)" },
+  { id: "VEO", name: "VEO (Image-to-Video)", description: "Modèle image-to-video de Leonardo — animation dirigée par prompt texte" },
 ] as const;
 
 export type VideoModelId = typeof VIDEO_MODELS[number]["id"];
@@ -243,7 +242,7 @@ export async function generateVideoFromImage(params: {
 
   let generationId: string | undefined;
 
-  if (motionModel === "SVD") {
+  if (motionModel === "SVD" || motionModel === "SVD Motion") {
     const response = await fetch(`${LEONARDO_BASE}/generations-motion-svd`, {
       method: "POST",
       headers: authHeaders(apiKey),
@@ -263,7 +262,6 @@ export async function generateVideoFromImage(params: {
         imageId,
         imageType: "UPLOADED",
         prompt: prompt.trim(),
-        motionModel,
         resolution: "RESOLUTION_720",
         frameInterpolation: true,
         promptEnhance: false,
