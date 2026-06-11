@@ -67,7 +67,7 @@ function SlotCard({
 }: SlotCardProps) {
   const refInputRef = React.useRef<HTMLInputElement>(null);
   const [showAnimForm, setShowAnimForm] = React.useState(false);
-  const [animModel, setAnimModel] = React.useState<VideoModelId>("VEO");
+  const [animModel, setAnimModel] = React.useState<VideoModelId>("VEO3FAST");
   const [animPrompt, setAnimPrompt] = React.useState("");
   const [animStrength, setAnimStrength] = React.useState(4);
 
@@ -157,7 +157,7 @@ function SlotCard({
           </div>
 
           {/* Prompt (VEO only) */}
-          {animModel !== "SVD" ? (
+          {animModel !== "SVD" && animModel !== "MOTION2" ? (
             <div className="flex flex-col gap-1">
               <label className="text-xs text-muted-foreground">
                 Prompt de mouvement <span className="text-destructive">*</span>

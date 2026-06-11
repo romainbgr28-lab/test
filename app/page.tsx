@@ -435,7 +435,8 @@ export default function Home() {
     const loadId = `${segId}-${slotIdx}`;
     setVideoLoadingIds((prev) => new Set(prev).add(loadId));
     try {
-      const response = await fetch("/api/generate-video", {
+      // Étape 1 : démarrer la génération (retour rapide, évite le timeout Vercel)
+      const startRes = await fetch("/api/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -446,13 +447,31 @@ export default function Home() {
           apiKey: config.leonardoApiKey || undefined,
         }),
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur génération vidéo");
+      const startData = await startRes.json();
+      if (!startRes.ok) throw new Error(startData?.error ?? "Erreur au démarrage de la génération vidéo");
+      const { generationId } = startData as { generationId: string };
+
+      // Étape 2 : polling côté client toutes les 5s, max 5 minutes
+      const apiKeyParam = config.leonardoApiKey ? `&apiKey=${encodeURIComponent(config.leonardoApiKey)}` : "";
+      let videoUrl: string | undefined;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const pollRes = await fetch(`/api/generate-video/status?generationId=${generationId}${apiKeyParam}`);
+        const pollData = await pollRes.json();
+        if (!pollRes.ok) throw new Error(pollData?.error ?? "Erreur de polling");
+        if (pollData.status === "COMPLETE" && pollData.videoUrl) {
+          videoUrl = pollData.videoUrl as string;
+          break;
+        }
+        if (pollData.status === "FAILED") throw new Error("La génération vidéo a échoué côté Leonardo.");
+      }
+      if (!videoUrl) throw new Error("Délai d'attente dépassé (5 min). Réessaie.");
+
       setSegments((prev) =>
         prev.map((s) => {
           if (s.id !== segId || !s.imageSlots) return s;
           const slots = s.imageSlots.map((sl, i) =>
-            i === slotIdx ? { ...sl, motionVideoUrl: data.videoUrl as string } : sl
+            i === slotIdx ? { ...sl, motionVideoUrl: videoUrl! } : sl
           );
           return { ...s, imageSlots: slots };
         })

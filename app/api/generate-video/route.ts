@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { generateVideoFromImage } from "@/lib/leonardo";
+import { startVideoGeneration } from "@/lib/leonardo";
 
 export const runtime = "nodejs";
 
+// Démarre la génération vidéo et retourne le generationId immédiatement.
+// Le client poll ensuite /api/generate-video/status jusqu'à COMPLETE.
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -22,7 +24,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "imageUrl manquant." }, { status: 400 });
     }
 
-    const result = await generateVideoFromImage({
+    const { generationId, apiCreditCost } = await startVideoGeneration({
       imageDataUrl: imageUrl,
       apiKey: resolvedApiKey,
       motionModel: motionModel ?? "SVD",
@@ -30,11 +32,10 @@ export async function POST(req: NextRequest) {
       motionStrength: motionStrength ?? 4,
     });
 
-    return NextResponse.json({ videoUrl: result.videoUrl, apiCreditCost: result.apiCreditCost });
+    return NextResponse.json({ generationId, apiCreditCost });
   } catch (error) {
-    // Le message inclut la réponse brute Leonardo pour diagnostic
     const message = error instanceof Error ? error.message : String(error);
-    console.error("[generate-video]", message);
-    return NextResponse.json({ error: message, debug: message }, { status: 500 });
+    console.error("[generate-video/start]", message);
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
