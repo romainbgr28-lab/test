@@ -169,4 +169,7 @@ export interface Clip {
   imageUrl: string;
   duration: number;
   narration: string;
+  motionVideoUrl?: string;
+  videoTrimStart?: number; // seconds into the source video
+  videoTrimEnd?: number;   // seconds into the source video
 }

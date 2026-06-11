@@ -13,6 +13,7 @@ export function buildClipsFromSegments(segments: VideoSegment[], _beatDuration: 
     let remaining = segment.duration;
     for (let i = 0; i < count; i++) {
       const dur = Math.max(0.1, i === count - 1 ? Math.round(remaining * 10) / 10 : baseDur);
+      const slot = segment.imageSlots?.[i];
       clips.push({
         id: uid(),
         segmentId: segment.id,
@@ -21,6 +22,9 @@ export function buildClipsFromSegments(segments: VideoSegment[], _beatDuration: 
         imageUrl: imgs[i] ?? "",
         duration: dur,
         narration: segment.narration,
+        motionVideoUrl: slot?.motionVideoUrl,
+        videoTrimStart: 0,
+        videoTrimEnd: undefined,
       });
       remaining = Math.round((remaining - baseDur) * 10) / 10;
     }

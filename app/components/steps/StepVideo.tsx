@@ -9,7 +9,7 @@ import type { Clip, Platform, SubtitleEntry, VideoRenderOptions } from "@/types"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { Button } from "../ui/Button";
 import { Select } from "../ui/Select";
-import { clipsToBeats, drawFrame, loadImages } from "@/lib/video-render";
+import { clipsToBeats, drawFrame, loadImages, loadVideos } from "@/lib/video-render";
 import { getDimensionsForPlatform } from "@/lib/pollinations";
 import { getTotalDuration } from "@/lib/clips";
 import { TimelineEditor } from "../ui/TimelineEditor";
@@ -23,6 +23,7 @@ interface StepVideoProps {
   subtitles: SubtitleEntry[];
   onSubtitlesChange: (s: SubtitleEntry[]) => void;
   onClipDurationChange: (id: string, duration: number) => void;
+  onClipTrimChange: (id: string, trimStart: number, trimEnd: number | undefined) => void;
   onProceed: () => void;
 }
 
@@ -241,7 +242,7 @@ function AudioPanel({
 
 export function StepVideo({
   clips, voiceoverUrl, platform, subtitles, onSubtitlesChange,
-  onClipDurationChange, onProceed,
+  onClipDurationChange, onClipTrimChange, onProceed,
 }: StepVideoProps) {
   const canvasRef = React.useRef<HTMLCanvasElement>(null);
   const audioRef = React.useRef<HTMLAudioElement>(null);
@@ -260,6 +261,7 @@ export function StepVideo({
   const [musicVolume, setMusicVolume] = React.useState(30);
   const [voiceVolume, setVoiceVolume] = React.useState(100);
   const [showExportPanel, setShowExportPanel] = React.useState(false);
+  const [trimVideoDuration, setTrimVideoDuration] = React.useState<number>(8);
 
   const { width: nativeW, height: nativeH } = getDimensionsForPlatform(platform);
   const previewW = Math.round((PREVIEW_HEIGHT * nativeW) / nativeH);
@@ -269,6 +271,7 @@ export function StepVideo({
 
   const beatsRef = React.useRef(clipsToBeats(clips));
   const imagesRef = React.useRef<Map<string, HTMLImageElement>>(new Map());
+  const videosRef = React.useRef<Map<string, HTMLVideoElement>>(new Map());
   const subtitlesRef = React.useRef(subtitles);
   const optionsRef = React.useRef(options);
 
@@ -296,6 +299,7 @@ export function StepVideo({
       visualDescription: "", duration: c.duration,
       imageUrl: c.imageUrl, imageBlob: c.imageUrl, imageUrls: [c.imageUrl],
     })));
+    videosRef.current = await loadVideos(clips);
     setReady(true);
     setLoading(false);
     renderFrame(0);
@@ -304,7 +308,16 @@ export function StepVideo({
   function renderFrame(t: number) {
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
-    drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current);
+    // Sync video element currentTime for the active beat
+    const beat = beatsRef.current.find((b) => t >= b.startTime && t < b.endTime);
+    if (beat?.videoUrl) {
+      const vid = videosRef.current.get(beat.videoUrl);
+      if (vid) {
+        const targetTime = (beat.videoTrimStart ?? 0) + (t - beat.startTime);
+        if (Math.abs(vid.currentTime - targetTime) > 0.1) vid.currentTime = targetTime;
+      }
+    }
+    drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current, videosRef.current);
   }
 
   React.useEffect(() => {
@@ -328,10 +341,21 @@ export function StepVideo({
     function frame() {
       const t = audio!.currentTime;
       setCurrentTime(t);
-      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current);
+      // Sync video for current beat
+      const beat = beatsRef.current.find((b) => t >= b.startTime && t < b.endTime);
+      if (beat?.videoUrl) {
+        const vid = videosRef.current.get(beat.videoUrl);
+        if (vid && vid.paused) {
+          vid.currentTime = (beat.videoTrimStart ?? 0) + (t - beat.startTime);
+          vid.play().catch(() => {});
+        }
+      }
+      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current, videosRef.current);
       if (!audio!.paused && !audio!.ended) {
         rafRef.current = requestAnimationFrame(frame);
       } else {
+        // Pause all videos
+        videosRef.current.forEach((v) => v.pause());
         setPlaying(false);
       }
     }
@@ -362,9 +386,17 @@ export function StepVideo({
         const ctx = canvasRef.current?.getContext("2d")!;
         function frameNoAudio() {
           const t = (performance.now() - startWallTime) / 1000;
-          if (t >= totalDuration) { setPlaying(false); setCurrentTime(totalDuration); return; }
+          if (t >= totalDuration) { videosRef.current.forEach((v) => v.pause()); setPlaying(false); setCurrentTime(totalDuration); return; }
           setCurrentTime(t);
-          drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current);
+          const beat = beatsRef.current.find((b) => t >= b.startTime && t < b.endTime);
+          if (beat?.videoUrl) {
+            const vid = videosRef.current.get(beat.videoUrl);
+            if (vid && vid.paused) {
+              vid.currentTime = (beat.videoTrimStart ?? 0) + (t - beat.startTime);
+              vid.play().catch(() => {});
+            }
+          }
+          drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, optionsRef.current, videosRef.current);
           rafRef.current = requestAnimationFrame(frameNoAudio);
         }
         rafRef.current = requestAnimationFrame(frameNoAudio);
@@ -432,7 +464,20 @@ export function StepVideo({
     const FPS = 30;
     recorder.start(100);
     for (let f = 0; f <= Math.ceil(totalDuration * FPS); f++) {
-      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, f / FPS, subtitlesRef.current, opts);
+      const t = f / FPS;
+      // Seek video elements to the correct position for this frame
+      const beat = beatsRef.current.find((b) => t >= b.startTime && t < b.endTime);
+      if (beat?.videoUrl) {
+        const vid = videosRef.current.get(beat.videoUrl);
+        if (vid) {
+          const targetTime = (beat.videoTrimStart ?? 0) + (t - beat.startTime);
+          if (Math.abs(vid.currentTime - targetTime) > 0.05) {
+            vid.currentTime = targetTime;
+            await new Promise<void>((r) => { vid.onseeked = () => r(); setTimeout(r, 200); });
+          }
+        }
+      }
+      drawFrame(ctx, nativeW, nativeH, beatsRef.current, imagesRef.current, t, subtitlesRef.current, opts, videosRef.current);
       await new Promise<void>((r) => setTimeout(r, 1000 / FPS));
     }
     recorder.stop();
@@ -577,6 +622,62 @@ export function StepVideo({
             onClipResize={onClipDurationChange}
           />
         )}
+
+        {/* ── Video Trim Panel ────────────────────────────────── */}
+        {(() => {
+          const selectedClip = selectedClipId ? clips.find((c) => c.id === selectedClipId) : null;
+          if (!selectedClip?.motionVideoUrl) return null;
+          const vid = videosRef.current.get(selectedClip.motionVideoUrl);
+          const vidDuration = vid?.duration && isFinite(vid.duration) ? vid.duration : trimVideoDuration;
+          const trimStart = selectedClip.videoTrimStart ?? 0;
+          const trimEnd = selectedClip.videoTrimEnd ?? Math.min(vidDuration, selectedClip.duration);
+          return (
+            <section className="rounded-lg border border-primary/40 bg-secondary/20 p-4">
+              <p className="mb-3 text-xs font-semibold uppercase tracking-wide text-primary">
+                ✂️ Découpe vidéo — clip sélectionné
+              </p>
+              <div className="flex flex-col gap-4 md:flex-row md:gap-6">
+                <video
+                  key={selectedClip.motionVideoUrl}
+                  src={selectedClip.motionVideoUrl}
+                  controls
+                  muted
+                  className="h-32 rounded-md border border-border bg-black"
+                  style={{ maxWidth: 200 }}
+                  onLoadedMetadata={(e) => setTrimVideoDuration((e.target as HTMLVideoElement).duration)}
+                />
+                <div className="flex flex-1 flex-col gap-3">
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium">
+                      Début du clip : <span className="font-mono text-primary">{trimStart.toFixed(1)}s</span>
+                    </label>
+                    <input
+                      type="range" min={0} max={Math.max(0, vidDuration - 0.1)} step={0.1}
+                      value={trimStart}
+                      onChange={(e) => onClipTrimChange(selectedClip.id, Number(e.target.value), trimEnd)}
+                      className="w-full accent-primary"
+                    />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <label className="text-sm font-medium">
+                      Fin du clip : <span className="font-mono text-primary">{trimEnd.toFixed(1)}s</span>
+                      <span className="ml-2 text-xs text-muted-foreground">(durée utilisée : {(trimEnd - trimStart).toFixed(1)}s)</span>
+                    </label>
+                    <input
+                      type="range" min={trimStart + 0.1} max={vidDuration} step={0.1}
+                      value={trimEnd}
+                      onChange={(e) => onClipTrimChange(selectedClip.id, trimStart, Number(e.target.value))}
+                      className="w-full accent-primary"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Vidéo source : {vidDuration.toFixed(1)}s · Seule la portion [{trimStart.toFixed(1)}s → {trimEnd.toFixed(1)}s] sera utilisée dans le rendu.
+                  </p>
+                </div>
+              </div>
+            </section>
+          );
+        })()}
 
         {/* ── Timeline (sous-titres) ──────────────────────────── */}
         <section>

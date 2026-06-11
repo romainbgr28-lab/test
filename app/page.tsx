@@ -576,6 +576,10 @@ export default function Home() {
     });
   }
 
+  function handleClipTrimChange(id: string, trimStart: number, trimEnd: number | undefined) {
+    setClips((prev) => prev.map((c) => c.id === id ? { ...c, videoTrimStart: trimStart, videoTrimEnd: trimEnd } : c));
+  }
+
   async function handleGenerateMetadata() {
     setGeneratingMetadata(true);
     try {
@@ -755,6 +759,7 @@ export default function Home() {
           subtitles={subtitles}
           onSubtitlesChange={setSubtitles}
           onClipDurationChange={handleClipDurationChange}
+          onClipTrimChange={handleClipTrimChange}
           onProceed={handleProceedToExport}
         />
       )}

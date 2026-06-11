@@ -5,6 +5,8 @@ export interface Beat {
   startTime: number;
   endTime: number;
   imageUrl: string;
+  videoUrl?: string;
+  videoTrimStart?: number;
   startScale: number;
   endScale: number;
   startX: number;
@@ -176,6 +178,27 @@ function drawSubtitles(
 
 const TRANSITION_DURATION = 0.35;
 
+function drawBeatMedia(
+  ctx: CanvasRenderingContext2D,
+  beat: Beat,
+  images: Map<string, HTMLImageElement>,
+  videos: Map<string, HTMLVideoElement>,
+  canvasW: number,
+  canvasH: number,
+  progress: number,
+  kenBurns: boolean
+) {
+  if (beat.videoUrl) {
+    const vid = videos.get(beat.videoUrl);
+    if (vid) {
+      drawImageKenBurns(ctx, vid as unknown as HTMLImageElement, canvasW, canvasH, beat, progress, kenBurns);
+      return;
+    }
+  }
+  const img = images.get(beat.imageUrl);
+  if (img) drawImageKenBurns(ctx, img, canvasW, canvasH, beat, progress, kenBurns);
+}
+
 export function drawFrame(
   ctx: CanvasRenderingContext2D,
   canvasW: number,
@@ -184,7 +207,8 @@ export function drawFrame(
   images: Map<string, HTMLImageElement>,
   currentTime: number,
   subtitles: SubtitleEntry[],
-  options: VideoRenderOptions
+  options: VideoRenderOptions,
+  videos: Map<string, HTMLVideoElement> = new Map()
 ) {
   ctx.fillStyle = "#000";
   ctx.fillRect(0, 0, canvasW, canvasH);
@@ -194,18 +218,16 @@ export function drawFrame(
     // After last beat: show last frame frozen
     if (beats.length > 0 && currentTime >= beats[beats.length - 1].endTime) {
       const beat = beats[beats.length - 1];
-      const img = images.get(beat.imageUrl);
-      if (img) drawImageKenBurns(ctx, img, canvasW, canvasH, beat, 1, options.kenBurns);
+      drawBeatMedia(ctx, beat, images, videos, canvasW, canvasH, 1, options.kenBurns);
     }
     return;
   }
 
   const beat = beats[bi];
   const beatProgress = (currentTime - beat.startTime) / (beat.endTime - beat.startTime);
-  const img = images.get(beat.imageUrl);
 
   // Draw current beat
-  if (img) drawImageKenBurns(ctx, img, canvasW, canvasH, beat, beatProgress, options.kenBurns);
+  drawBeatMedia(ctx, beat, images, videos, canvasW, canvasH, beatProgress, options.kenBurns);
 
   // Transition: crossfade to next beat at end of current beat
   if (options.transitions && bi < beats.length - 1) {
@@ -213,13 +235,10 @@ export function drawFrame(
     if (timeToEnd < TRANSITION_DURATION) {
       const alpha = 1 - timeToEnd / TRANSITION_DURATION;
       const nextBeat = beats[bi + 1];
-      const nextImg = images.get(nextBeat.imageUrl);
-      if (nextImg) {
-        ctx.save();
-        ctx.globalAlpha = alpha;
-        drawImageKenBurns(ctx, nextImg, canvasW, canvasH, nextBeat, 0, options.kenBurns);
-        ctx.restore();
-      }
+      ctx.save();
+      ctx.globalAlpha = alpha;
+      drawBeatMedia(ctx, nextBeat, images, videos, canvasW, canvasH, 0, options.kenBurns);
+      ctx.restore();
     }
   }
 
@@ -241,6 +260,8 @@ export { generateSubtitles };
 interface ClipLike {
   imageUrl: string;
   duration: number;
+  motionVideoUrl?: string;
+  videoTrimStart?: number;
 }
 
 export function clipsToBeats(clips: ClipLike[]): Beat[] {
@@ -251,9 +272,31 @@ export function clipsToBeats(clips: ClipLike[]): Beat[] {
       startTime: cursor,
       endTime: cursor + clip.duration,
       imageUrl: clip.imageUrl,
+      videoUrl: clip.motionVideoUrl,
+      videoTrimStart: clip.videoTrimStart ?? 0,
       ...traj,
     };
     cursor += clip.duration;
     return beat;
   });
+}
+
+export async function loadVideos(clips: ClipLike[]): Promise<Map<string, HTMLVideoElement>> {
+  const urls = [...new Set(clips.map((c) => c.motionVideoUrl).filter(Boolean) as string[])];
+  const map = new Map<string, HTMLVideoElement>();
+  await Promise.all(
+    urls.map(
+      (url) =>
+        new Promise<void>((resolve) => {
+          const vid = document.createElement("video");
+          vid.crossOrigin = "anonymous";
+          vid.preload = "auto";
+          vid.muted = true;
+          vid.onloadeddata = () => { map.set(url, vid); resolve(); };
+          vid.onerror = () => resolve();
+          vid.src = url;
+        })
+    )
+  );
+  return map;
 }
