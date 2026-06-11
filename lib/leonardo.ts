@@ -213,6 +213,70 @@ export interface LeonardoGenerationResult {
   apiCreditCost?: number;
 }
 
+export interface LeonardoVideoResult {
+  videoUrl: string;
+  apiCreditCost?: number;
+}
+
+// SVD Motion : anime une image vers une courte vidéo MP4 (~4s).
+// L'image (data URL) est d'abord uploadée, puis soumise à /generations-motion-svd.
+// Polling sur /generations/{id} — le résultat est dans generated_images[0].motionMP4URL.
+export async function generateVideoFromImage(params: {
+  imageDataUrl: string;
+  apiKey: string;
+  motionStrength?: number;
+}): Promise<LeonardoVideoResult> {
+  const { imageDataUrl, apiKey, motionStrength = 4 } = params;
+
+  const imageId = await uploadInitImage(apiKey, imageDataUrl);
+
+  const response = await fetch(`${LEONARDO_BASE}/generations-motion-svd`, {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify({
+      imageId,
+      isInitImage: true,
+      motionStrength,
+      isPublic: false,
+    }),
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(data?.error ?? "Échec du lancement de la génération vidéo Leonardo.");
+  }
+
+  const generationId: string | undefined =
+    data?.motionSvdGenerationJob?.generationId ??
+    data?.sdGenerationJob?.generationId;
+  if (!generationId) {
+    throw new Error("Réponse inattendue de Leonardo (identifiant de génération vidéo manquant).");
+  }
+
+  // Polling — la vidéo prend 30-90s, on autorise jusqu'à 5 minutes (60 × 5s)
+  const maxAttempts = 60;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise((resolve) => setTimeout(resolve, 5000));
+    const pollRes = await fetch(`${LEONARDO_BASE}/generations/${generationId}`, {
+      headers: authHeaders(apiKey),
+      cache: "no-store",
+    });
+    const pollData = await pollRes.json().catch(() => null);
+    if (!pollRes.ok) {
+      throw new Error(pollData?.error ?? "Échec de la récupération de la génération vidéo Leonardo.");
+    }
+    const gen = pollData?.generations_by_pk;
+    if (gen?.status === "COMPLETE") {
+      const videoUrl: string | undefined = gen?.generated_images?.[0]?.motionMP4URL;
+      if (!videoUrl) throw new Error("Aucune vidéo renvoyée par Leonardo.");
+      return { videoUrl, apiCreditCost: gen?.apiCreditCost };
+    }
+    if (gen?.status === "FAILED") {
+      throw new Error("La génération vidéo Leonardo a échoué.");
+    }
+  }
+  throw new Error("La génération vidéo Leonardo a expiré (délai de 5 minutes dépassé).");
+}
+
 export async function generateImageWithLeonardo(params: {
   prompt: string;
   apiKey: string;

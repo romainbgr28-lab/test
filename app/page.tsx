@@ -71,6 +71,7 @@ export default function Home() {
   const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
+  const [videoLoadingIds, setVideoLoadingIds] = React.useState<Set<string>>(new Set());
   const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
   const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
 
@@ -418,6 +419,45 @@ export default function Home() {
     toast({ title: `Segment ${segment.order} régénéré (${results.filter(Boolean).length} images)`, variant: "success" });
   }
 
+  async function handleAnimateSlot(segId: string, slotIdx: number) {
+    const segment = segments.find((s) => s.id === segId);
+    const slot = segment?.imageSlots?.[slotIdx];
+    if (!slot?.imageUrl) {
+      toast({ title: "Pas d'image à animer", description: "Génère d'abord l'image.", variant: "error" });
+      return;
+    }
+    const loadId = `${segId}-${slotIdx}`;
+    setVideoLoadingIds((prev) => new Set(prev).add(loadId));
+    try {
+      const response = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: slot.imageUrl,
+          motionStrength: 4,
+          apiKey: config.leonardoApiKey || undefined,
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.error ?? "Erreur génération vidéo");
+      setSegments((prev) =>
+        prev.map((s) => {
+          if (s.id !== segId || !s.imageSlots) return s;
+          const slots = s.imageSlots.map((sl, i) =>
+            i === slotIdx ? { ...sl, motionVideoUrl: data.videoUrl as string } : sl
+          );
+          return { ...s, imageSlots: slots };
+        })
+      );
+      toast({ title: "Animation générée !", description: "La vidéo est prête dans la carte image.", variant: "success" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec de l'animation", description: message, variant: "error" });
+    } finally {
+      setVideoLoadingIds((prev) => { const next = new Set(prev); next.delete(loadId); return next; });
+    }
+  }
+
   // Kept for compatibility — use handleRegenerateSegment in new UI
   async function handleRegenerateImage(id: string) { await handleRegenerateSegment(id); }
   function handleSegmentPromptChange(id: string, imagePrompt: string) {
@@ -668,8 +708,10 @@ export default function Home() {
           onSlotPromptChange={handleSlotPromptChange}
           onSlotReferenceChange={handleSlotReferenceChange}
           onDeleteSlotImage={handleDeleteSlotImage}
+          onAnimateSlot={handleAnimateSlot}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
+          videoLoadingIds={videoLoadingIds}
           leonardoApiKey={config.leonardoApiKey}
           selectedVisualStyleId={selectedVisualStyleId}
           onSelectVisualStyle={handleSelectVisualStyle}

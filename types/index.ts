@@ -25,6 +25,7 @@ export interface ImageSlot {
   prompt: string;
   referenceImage?: string;
   imageUrl?: string;
+  motionVideoUrl?: string;
 }
 
 export interface VideoSegment {

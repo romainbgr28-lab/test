@@ -1,7 +1,7 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus, ArrowRight, Loader2, Sparkles, RefreshCw, Plus, Minus, Upload, X } from "lucide-react";
+import { ImagePlus, ArrowRight, Loader2, Sparkles, RefreshCw, Plus, Minus, Upload, X, Film } from "lucide-react";
 import type { ImageModel, VideoSegment, VisualStyle } from "@/types";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { ModelSelector } from "../ui/ModelSelector";
@@ -30,8 +30,10 @@ interface StepImagesProps {
   onSlotPromptChange: (segId: string, slotIdx: number, prompt: string) => void;
   onSlotReferenceChange: (segId: string, slotIdx: number, ref: string | undefined) => void;
   onDeleteSlotImage: (segId: string, slotIdx: number) => void;
+  onAnimateSlot: (segId: string, slotIdx: number) => void;
   generatingImages: boolean;
   imageLoadingIds: Set<string>;
+  videoLoadingIds: Set<string>;
   leonardoApiKey?: string;
   selectedVisualStyleId: string | null;
   onSelectVisualStyle: (style: VisualStyle | null) => void;
@@ -48,16 +50,19 @@ interface SlotCardProps {
   prompt: string;
   referenceImage?: string;
   imageUrl?: string;
+  motionVideoUrl?: string;
   loading: boolean;
+  animating: boolean;
   onPromptChange: (v: string) => void;
   onReferenceChange: (ref: string | undefined) => void;
   onRegenerate: () => void;
   onDeleteImage: () => void;
+  onAnimate: () => void;
 }
 
 function SlotCard({
-  segId, slotIdx, slotCount, prompt, referenceImage, imageUrl, loading,
-  onPromptChange, onReferenceChange, onRegenerate, onDeleteImage,
+  segId, slotIdx, slotCount, prompt, referenceImage, imageUrl, motionVideoUrl, loading, animating,
+  onPromptChange, onReferenceChange, onRegenerate, onDeleteImage, onAnimate,
 }: SlotCardProps) {
   const refInputRef = React.useRef<HTMLInputElement>(null);
 
@@ -73,10 +78,24 @@ function SlotCard({
         <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">
           Image {slotIdx + 1}/{slotCount}
         </span>
-        <Button variant="outline" size="sm" onClick={onRegenerate} disabled={loading}>
-          {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
-          Régénérer
-        </Button>
+        <div className="flex items-center gap-1.5">
+          {imageUrl && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={onAnimate}
+              disabled={loading || animating}
+              title="Générer une animation vidéo à partir de cette image"
+            >
+              {animating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Film className="h-3 w-3" />}
+              {animating ? "Animation…" : motionVideoUrl ? "Ré-animer" : "Animer"}
+            </Button>
+          )}
+          <Button variant="outline" size="sm" onClick={onRegenerate} disabled={loading || animating}>
+            {loading ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+            Régénérer
+          </Button>
+        </div>
       </div>
 
       {/* Image preview */}
@@ -102,6 +121,21 @@ function SlotCard({
           </div>
         )}
       </div>
+
+      {/* Motion video preview */}
+      {motionVideoUrl && (
+        <div className="flex flex-col gap-1">
+          <span className="text-xs text-muted-foreground font-medium">Animation générée</span>
+          <video
+            src={motionVideoUrl}
+            autoPlay
+            loop
+            muted
+            playsInline
+            className="mx-auto w-28 rounded-md border border-border bg-secondary object-cover"
+          />
+        </div>
+      )}
 
       {/* Prompt */}
       <div className="flex flex-col gap-1">
@@ -159,18 +193,20 @@ function SlotCard({
 interface SegmentCardProps {
   segment: VideoSegment;
   imageLoadingIds: Set<string>;
+  videoLoadingIds: Set<string>;
   onImageCountChange: (count: number) => void;
   onSlotPromptChange: (slotIdx: number, prompt: string) => void;
   onSlotReferenceChange: (slotIdx: number, ref: string | undefined) => void;
   onRegenerateSlot: (slotIdx: number) => void;
   onRegenerateSegment: () => void;
   onDeleteSlotImage: (slotIdx: number) => void;
+  onAnimateSlot: (slotIdx: number) => void;
 }
 
 function SegmentCard({
-  segment, imageLoadingIds,
+  segment, imageLoadingIds, videoLoadingIds,
   onImageCountChange, onSlotPromptChange, onSlotReferenceChange,
-  onRegenerateSlot, onRegenerateSegment, onDeleteSlotImage,
+  onRegenerateSlot, onRegenerateSegment, onDeleteSlotImage, onAnimateSlot,
 }: SegmentCardProps) {
   const slots = segment.imageSlots ?? [];
   const autoCount = Math.max(1, Math.ceil(segment.duration / 3));
@@ -257,11 +293,14 @@ function SegmentCard({
                 prompt={slot.prompt}
                 referenceImage={slot.referenceImage}
                 imageUrl={slot.imageUrl}
+                motionVideoUrl={slot.motionVideoUrl}
                 loading={imageLoadingIds.has(`${segment.id}-${i}`)}
+                animating={videoLoadingIds.has(`${segment.id}-${i}`)}
                 onPromptChange={(v) => onSlotPromptChange(i, v)}
                 onReferenceChange={(ref) => onSlotReferenceChange(i, ref)}
                 onRegenerate={() => onRegenerateSlot(i)}
                 onDeleteImage={() => onDeleteSlotImage(i)}
+                onAnimate={() => onAnimateSlot(i)}
               />
             ))}
           </div>
@@ -281,7 +320,8 @@ export function StepImages({
   segments, imageModel, onImageModelChange,
   onGenerateAllImages, onRegenerateSegment, onRegenerateSlot,
   onImageCountChange, onSlotPromptChange, onSlotReferenceChange, onDeleteSlotImage,
-  generatingImages, imageLoadingIds,
+  onAnimateSlot,
+  generatingImages, imageLoadingIds, videoLoadingIds,
   leonardoApiKey, selectedVisualStyleId, onSelectVisualStyle, selectedVisualStyle,
   onProceed,
 }: StepImagesProps) {
@@ -365,12 +405,14 @@ export function StepImages({
               key={segment.id}
               segment={segment}
               imageLoadingIds={imageLoadingIds}
+              videoLoadingIds={videoLoadingIds}
               onImageCountChange={(count) => onImageCountChange(segment.id, count)}
               onSlotPromptChange={(idx, prompt) => onSlotPromptChange(segment.id, idx, prompt)}
               onSlotReferenceChange={(idx, ref) => onSlotReferenceChange(segment.id, idx, ref)}
               onRegenerateSlot={(idx) => onRegenerateSlot(segment.id, idx)}
               onRegenerateSegment={() => onRegenerateSegment(segment.id)}
               onDeleteSlotImage={(idx) => onDeleteSlotImage(segment.id, idx)}
+              onAnimateSlot={(idx) => onAnimateSlot(segment.id, idx)}
             />
           ))}
         </div>
