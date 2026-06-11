@@ -241,6 +241,7 @@ export async function generateVideoFromImage(params: {
   const imageId = await uploadInitImage(apiKey, imageDataUrl);
 
   let generationId: string | undefined;
+  let rawResponse: unknown;
 
   if (motionModel === "SVD" || motionModel === "SVD Motion") {
     const response = await fetch(`${LEONARDO_BASE}/generations-motion-svd`, {
@@ -248,11 +249,12 @@ export async function generateVideoFromImage(params: {
       headers: authHeaders(apiKey),
       body: JSON.stringify({ imageId, isInitImage: true, motionStrength, isPublic: false }),
     });
-    const data = await response.json().catch(() => null);
+    rawResponse = await response.json().catch(() => null);
     if (!response.ok) {
-      throw new Error(data?.error ?? "Échec du lancement de la génération SVD Motion.");
+      throw new Error((rawResponse as Record<string,string>)?.error ?? "Échec du lancement de la génération SVD Motion.");
     }
-    generationId = data?.motionSvdGenerationJob?.generationId ?? data?.sdGenerationJob?.generationId;
+    const d = rawResponse as Record<string, Record<string, string>>;
+    generationId = d?.motionSvdGenerationJob?.generationId ?? d?.sdGenerationJob?.generationId;
   } else {
     if (!prompt.trim()) throw new Error("Un prompt est requis pour les modèles VEO.");
     const response = await fetch(`${LEONARDO_BASE}/generations-image-to-video`, {
@@ -268,18 +270,23 @@ export async function generateVideoFromImage(params: {
         isPublic: false,
       }),
     });
-    const data = await response.json().catch(() => null);
+    rawResponse = await response.json().catch(() => null);
     if (!response.ok) {
-      const msg = data?.error ?? data?.message ?? JSON.stringify(data);
-      throw new Error(msg || "Échec du lancement de la génération image-to-video.");
+      const d = rawResponse as Record<string, string> | null;
+      throw new Error(d?.error ?? d?.message ?? JSON.stringify(rawResponse) ?? "Échec image-to-video.");
     }
+    const d = rawResponse as Record<string, unknown>;
     generationId =
-      data?.sdGenerationJob?.generationId ??
-      data?.motionGenerationJob?.generationId ??
-      data?.generationId;
+      (d?.sdGenerationJob as Record<string,string>)?.generationId ??
+      (d?.motionGenerationJob as Record<string,string>)?.generationId ??
+      d?.generationId as string ??
+      (d?.generation as Record<string,string>)?.id ??
+      d?.id as string;
   }
 
-  if (!generationId) throw new Error("Identifiant de génération vidéo introuvable dans la réponse Leonardo.");
+  console.log("[generate-video] rawResponse:", JSON.stringify(rawResponse), "→ generationId:", generationId);
+
+  if (!generationId) throw new Error(`generationId introuvable. Réponse Leonardo : ${JSON.stringify(rawResponse)}`);
 
   // Polling — jusqu'à 5 minutes (60 × 5s)
   for (let attempt = 0; attempt < 60; attempt++) {
