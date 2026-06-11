@@ -1,8 +1,9 @@
 "use client";
 
 import * as React from "react";
-import { ImagePlus, ArrowRight, Loader2, Sparkles, RefreshCw, Plus, Minus, Upload, X, Film } from "lucide-react";
+import { ImagePlus, ArrowRight, Loader2, Sparkles, RefreshCw, Plus, Minus, Upload, X, Film, ChevronDown, ChevronUp } from "lucide-react";
 import type { ImageModel, VideoSegment, VisualStyle } from "@/types";
+import { VIDEO_MODELS, type VideoModelId } from "@/lib/leonardo";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "../ui/Card";
 import { ModelSelector } from "../ui/ModelSelector";
 import { Button } from "../ui/Button";
@@ -30,7 +31,7 @@ interface StepImagesProps {
   onSlotPromptChange: (segId: string, slotIdx: number, prompt: string) => void;
   onSlotReferenceChange: (segId: string, slotIdx: number, ref: string | undefined) => void;
   onDeleteSlotImage: (segId: string, slotIdx: number) => void;
-  onAnimateSlot: (segId: string, slotIdx: number) => void;
+  onAnimateSlot: (segId: string, slotIdx: number, motionModel: VideoModelId, prompt: string, motionStrength: number) => void;
   generatingImages: boolean;
   imageLoadingIds: Set<string>;
   videoLoadingIds: Set<string>;
@@ -57,7 +58,7 @@ interface SlotCardProps {
   onReferenceChange: (ref: string | undefined) => void;
   onRegenerate: () => void;
   onDeleteImage: () => void;
-  onAnimate: () => void;
+  onAnimate: (motionModel: VideoModelId, animPrompt: string, motionStrength: number) => void;
 }
 
 function SlotCard({
@@ -65,6 +66,15 @@ function SlotCard({
   onPromptChange, onReferenceChange, onRegenerate, onDeleteImage, onAnimate,
 }: SlotCardProps) {
   const refInputRef = React.useRef<HTMLInputElement>(null);
+  const [showAnimForm, setShowAnimForm] = React.useState(false);
+  const [animModel, setAnimModel] = React.useState<VideoModelId>("VEO3_1FAST");
+  const [animPrompt, setAnimPrompt] = React.useState("");
+  const [animStrength, setAnimStrength] = React.useState(4);
+
+  function handleLaunchAnim() {
+    onAnimate(animModel, animPrompt, animStrength);
+    setShowAnimForm(false);
+  }
 
   async function handleRefFile(file: File) {
     if (!file.type.startsWith("image/")) return;
@@ -83,12 +93,14 @@ function SlotCard({
             <Button
               variant="outline"
               size="sm"
-              onClick={onAnimate}
+              onClick={() => !animating && setShowAnimForm((v) => !v)}
               disabled={loading || animating}
-              title="Générer une animation vidéo à partir de cette image"
+              title="Animer cette image en vidéo"
             >
-              {animating ? <Loader2 className="h-3 w-3 animate-spin" /> : <Film className="h-3 w-3" />}
-              {animating ? "Animation…" : motionVideoUrl ? "Ré-animer" : "Animer"}
+              {animating
+                ? <><Loader2 className="h-3 w-3 animate-spin" /> Animation…</>
+                : <><Film className="h-3 w-3" /> {motionVideoUrl ? "Ré-animer" : "Animer"} {showAnimForm ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}</>
+              }
             </Button>
           )}
           <Button variant="outline" size="sm" onClick={onRegenerate} disabled={loading || animating}>
@@ -121,6 +133,75 @@ function SlotCard({
           </div>
         )}
       </div>
+
+      {/* Animation form */}
+      {showAnimForm && imageUrl && (
+        <div className="flex flex-col gap-2 rounded-lg border border-border bg-secondary/40 p-3">
+          <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Paramètres d'animation</span>
+
+          {/* Model selector */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs text-muted-foreground">Modèle vidéo</label>
+            <select
+              value={animModel}
+              onChange={(e) => setAnimModel(e.target.value as VideoModelId)}
+              className="rounded-md border border-border bg-background px-2 py-1.5 text-xs focus:outline-none focus:ring-1 focus:ring-primary"
+            >
+              {VIDEO_MODELS.map((m) => (
+                <option key={m.id} value={m.id}>{m.name}</option>
+              ))}
+            </select>
+            <span className="text-[10px] text-muted-foreground">
+              {VIDEO_MODELS.find((m) => m.id === animModel)?.description}
+            </span>
+          </div>
+
+          {/* Prompt (VEO only) */}
+          {animModel !== "SVD" ? (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">
+                Prompt de mouvement <span className="text-destructive">*</span>
+              </label>
+              <textarea
+                value={animPrompt}
+                onChange={(e) => setAnimPrompt(e.target.value)}
+                placeholder="Ex : caméra qui glisse doucement vers la droite, lumière chaude qui pulse…"
+                rows={2}
+                className="rounded-md border border-border bg-background px-2 py-1.5 text-xs resize-none focus:outline-none focus:ring-1 focus:ring-primary"
+              />
+            </div>
+          ) : (
+            <div className="flex flex-col gap-1">
+              <label className="text-xs text-muted-foreground">Intensité du mouvement ({animStrength})</label>
+              <input
+                type="range"
+                min={1}
+                max={10}
+                step={1}
+                value={animStrength}
+                onChange={(e) => setAnimStrength(Number(e.target.value))}
+                className="accent-primary"
+              />
+              <div className="flex justify-between text-[10px] text-muted-foreground">
+                <span>Subtil</span><span>Fort</span>
+              </div>
+            </div>
+          )}
+
+          <div className="flex gap-2 pt-1">
+            <Button
+              size="sm"
+              onClick={handleLaunchAnim}
+              disabled={animModel !== "SVD" && !animPrompt.trim()}
+            >
+              <Film className="h-3 w-3" /> Lancer l&apos;animation
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowAnimForm(false)}>
+              Annuler
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Motion video preview */}
       {motionVideoUrl && (
@@ -200,7 +281,7 @@ interface SegmentCardProps {
   onRegenerateSlot: (slotIdx: number) => void;
   onRegenerateSegment: () => void;
   onDeleteSlotImage: (slotIdx: number) => void;
-  onAnimateSlot: (slotIdx: number) => void;
+  onAnimateSlot: (slotIdx: number, motionModel: VideoModelId, prompt: string, motionStrength: number) => void;
 }
 
 function SegmentCard({
@@ -300,7 +381,7 @@ function SegmentCard({
                 onReferenceChange={(ref) => onSlotReferenceChange(i, ref)}
                 onRegenerate={() => onRegenerateSlot(i)}
                 onDeleteImage={() => onDeleteSlotImage(i)}
-                onAnimate={() => onAnimateSlot(i)}
+                onAnimate={(model, prompt, strength) => onAnimateSlot(i, model, prompt, strength)}
               />
             ))}
           </div>
@@ -412,7 +493,7 @@ export function StepImages({
               onRegenerateSlot={(idx) => onRegenerateSlot(segment.id, idx)}
               onRegenerateSegment={() => onRegenerateSegment(segment.id)}
               onDeleteSlotImage={(idx) => onDeleteSlotImage(segment.id, idx)}
-              onAnimateSlot={(idx) => onAnimateSlot(segment.id, idx)}
+              onAnimateSlot={(idx, model, prompt, strength) => onAnimateSlot(segment.id, idx, model, prompt, strength)}
             />
           ))}
         </div>

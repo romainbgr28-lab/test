@@ -4,8 +4,10 @@ import { generateVideoFromImage } from "@/lib/leonardo";
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { imageUrl, motionStrength, apiKey } = body as {
+    const { imageUrl, motionModel, prompt, motionStrength, apiKey } = body as {
       imageUrl?: string;
+      motionModel?: string;
+      prompt?: string;
       motionStrength?: number;
       apiKey?: string;
     };
@@ -21,6 +23,8 @@ export async function POST(req: NextRequest) {
     const result = await generateVideoFromImage({
       imageDataUrl: imageUrl,
       apiKey: resolvedApiKey,
+      motionModel: motionModel ?? "SVD",
+      prompt: prompt ?? "",
       motionStrength: motionStrength ?? 4,
     });
 

@@ -218,63 +218,89 @@ export interface LeonardoVideoResult {
   apiCreditCost?: number;
 }
 
-// SVD Motion : anime une image vers une courte vidéo MP4 (~4s).
-// L'image (data URL) est d'abord uploadée, puis soumise à /generations-motion-svd.
-// Polling sur /generations/{id} — le résultat est dans generated_images[0].motionMP4URL.
+export const VIDEO_MODELS = [
+  { id: "SVD", name: "SVD Motion", description: "Stable Video Diffusion — fluide, sans prompt" },
+  { id: "VEO3_1", name: "VEO 3 (qualité)", description: "Google VEO 3 — animation dirigée par prompt, haute qualité" },
+  { id: "VEO3_1FAST", name: "VEO 3 Fast (rapide)", description: "Google VEO 3 Fast — prompt, moins cher et plus rapide" },
+] as const;
+
+export type VideoModelId = typeof VIDEO_MODELS[number]["id"];
+
+// Anime une image (data URL) vers un court MP4 via Leonardo AI.
+// - SVD  : POST /generations-motion-svd   (motionStrength, pas de prompt)
+// - VEO3 : POST /generations-image-to-video (prompt obligatoire, motionModel)
+// Dans les deux cas le polling se fait sur GET /generations/{id}.
 export async function generateVideoFromImage(params: {
   imageDataUrl: string;
   apiKey: string;
+  motionModel?: string;
+  prompt?: string;
   motionStrength?: number;
 }): Promise<LeonardoVideoResult> {
-  const { imageDataUrl, apiKey, motionStrength = 4 } = params;
+  const { imageDataUrl, apiKey, motionModel = "SVD", prompt = "", motionStrength = 4 } = params;
 
   const imageId = await uploadInitImage(apiKey, imageDataUrl);
 
-  const response = await fetch(`${LEONARDO_BASE}/generations-motion-svd`, {
-    method: "POST",
-    headers: authHeaders(apiKey),
-    body: JSON.stringify({
-      imageId,
-      isInitImage: true,
-      motionStrength,
-      isPublic: false,
-    }),
-  });
-  const data = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(data?.error ?? "Échec du lancement de la génération vidéo Leonardo.");
+  let generationId: string | undefined;
+
+  if (motionModel === "SVD") {
+    const response = await fetch(`${LEONARDO_BASE}/generations-motion-svd`, {
+      method: "POST",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({ imageId, isInitImage: true, motionStrength, isPublic: false }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      throw new Error(data?.error ?? "Échec du lancement de la génération SVD Motion.");
+    }
+    generationId = data?.motionSvdGenerationJob?.generationId ?? data?.sdGenerationJob?.generationId;
+  } else {
+    if (!prompt.trim()) throw new Error("Un prompt est requis pour les modèles VEO.");
+    const response = await fetch(`${LEONARDO_BASE}/generations-image-to-video`, {
+      method: "POST",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({
+        imageId,
+        imageType: "UPLOADED",
+        prompt: prompt.trim(),
+        motionModel,
+        resolution: "RESOLUTION_720",
+        frameInterpolation: true,
+        promptEnhance: false,
+        isPublic: false,
+      }),
+    });
+    const data = await response.json().catch(() => null);
+    if (!response.ok) {
+      const msg = data?.error ?? data?.message ?? JSON.stringify(data);
+      throw new Error(msg || "Échec du lancement de la génération image-to-video.");
+    }
+    generationId =
+      data?.sdGenerationJob?.generationId ??
+      data?.motionGenerationJob?.generationId ??
+      data?.generationId;
   }
 
-  const generationId: string | undefined =
-    data?.motionSvdGenerationJob?.generationId ??
-    data?.sdGenerationJob?.generationId;
-  if (!generationId) {
-    throw new Error("Réponse inattendue de Leonardo (identifiant de génération vidéo manquant).");
-  }
+  if (!generationId) throw new Error("Identifiant de génération vidéo introuvable dans la réponse Leonardo.");
 
-  // Polling — la vidéo prend 30-90s, on autorise jusqu'à 5 minutes (60 × 5s)
-  const maxAttempts = 60;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  // Polling — jusqu'à 5 minutes (60 × 5s)
+  for (let attempt = 0; attempt < 60; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 5000));
     const pollRes = await fetch(`${LEONARDO_BASE}/generations/${generationId}`, {
       headers: authHeaders(apiKey),
       cache: "no-store",
     });
     const pollData = await pollRes.json().catch(() => null);
-    if (!pollRes.ok) {
-      throw new Error(pollData?.error ?? "Échec de la récupération de la génération vidéo Leonardo.");
-    }
+    if (!pollRes.ok) throw new Error(pollData?.error ?? "Erreur de polling génération vidéo.");
     const gen = pollData?.generations_by_pk;
     if (gen?.status === "COMPLETE") {
       const videoUrl: string | undefined = gen?.generated_images?.[0]?.motionMP4URL;
-      if (!videoUrl) throw new Error("Aucune vidéo renvoyée par Leonardo.");
+      if (!videoUrl) throw new Error("Aucune URL vidéo renvoyée par Leonardo.");
       return { videoUrl, apiCreditCost: gen?.apiCreditCost };
     }
-    if (gen?.status === "FAILED") {
-      throw new Error("La génération vidéo Leonardo a échoué.");
-    }
+    if (gen?.status === "FAILED") throw new Error("La génération vidéo Leonardo a échoué.");
   }
-  throw new Error("La génération vidéo Leonardo a expiré (délai de 5 minutes dépassé).");
+  throw new Error("La génération vidéo a expiré (5 minutes).");
 }
 
 export async function generateImageWithLeonardo(params: {

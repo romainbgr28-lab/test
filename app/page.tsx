@@ -419,7 +419,13 @@ export default function Home() {
     toast({ title: `Segment ${segment.order} régénéré (${results.filter(Boolean).length} images)`, variant: "success" });
   }
 
-  async function handleAnimateSlot(segId: string, slotIdx: number) {
+  async function handleAnimateSlot(
+    segId: string,
+    slotIdx: number,
+    motionModel: string,
+    prompt: string,
+    motionStrength: number
+  ) {
     const segment = segments.find((s) => s.id === segId);
     const slot = segment?.imageSlots?.[slotIdx];
     if (!slot?.imageUrl) {
@@ -434,7 +440,9 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           imageUrl: slot.imageUrl,
-          motionStrength: 4,
+          motionModel,
+          prompt,
+          motionStrength,
           apiKey: config.leonardoApiKey || undefined,
         }),
       });
@@ -708,7 +716,7 @@ export default function Home() {
           onSlotPromptChange={handleSlotPromptChange}
           onSlotReferenceChange={handleSlotReferenceChange}
           onDeleteSlotImage={handleDeleteSlotImage}
-          onAnimateSlot={handleAnimateSlot}
+          onAnimateSlot={(segId, slotIdx, model, prompt, strength) => handleAnimateSlot(segId, slotIdx, model, prompt, strength)}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
           videoLoadingIds={videoLoadingIds}
