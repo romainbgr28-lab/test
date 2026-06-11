@@ -1,6 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { generateVideoFromImage } from "@/lib/leonardo";
 
+export const runtime = "nodejs";
+
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
@@ -30,7 +32,9 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ videoUrl: result.videoUrl, apiCreditCost: result.apiCreditCost });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Erreur inconnue";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Le message inclut la réponse brute Leonardo pour diagnostic
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("[generate-video]", message);
+    return NextResponse.json({ error: message, debug: message }, { status: 500 });
   }
 }
