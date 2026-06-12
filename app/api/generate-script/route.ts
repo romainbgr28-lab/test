@@ -215,29 +215,9 @@ Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles,
             iteration
           );
 
-          // Fact-grounding : supprime les détails inventés non présents dans la note de recherche
-          let groundedRawText = rawText;
-          if (researchBrief) {
-            send({ type: "status", iteration, message: "Vérification factuelle : suppression des détails non confirmés par la recherche..." });
-            let parsedForGrounding: ScriptResponse | null = null;
-            try { parsedForGrounding = extractJson<ScriptResponse>(rawText); } catch { /* ignore */ }
-            if (parsedForGrounding?.script) {
-              const groundedScript = await groundScriptToResearch({
-                apiKey: key,
-                model,
-                script: parsedForGrounding.script,
-                researchBrief,
-              });
-              groundedRawText = rawText.replace(
-                parsedForGrounding.script,
-                groundedScript.trim()
-              );
-            }
-          }
-
           send({ type: "status", iteration, message: "Analyse du script et calcul du score de viralité..." });
 
-          const parsed = extractJson<ScriptResponse>(groundedRawText);
+          const parsed = extractJson<ScriptResponse>(rawText);
           if (!parsed.script || typeof parsed.script !== "string" || parsed.script.trim().length === 0) {
             throw new Error("Le script généré est invalide. Réessaie.");
           }
@@ -272,6 +252,18 @@ Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles,
 
         if (!best) {
           throw new Error("Le script généré est invalide. Réessaie.");
+        }
+
+        // Fact-grounding uniquement sur la meilleure version finale
+        if (researchBrief) {
+          send({ type: "status", message: "Vérification factuelle : suppression des détails non confirmés par la recherche..." });
+          const groundedScript = await groundScriptToResearch({
+            apiKey: key,
+            model,
+            script: best.script,
+            researchBrief,
+          });
+          best = { ...best, script: groundedScript.trim() };
         }
 
         send({ type: "status", message: "Script finalisé !" });
