@@ -159,12 +159,9 @@ N'invente aucune donnée : tout doit provenir de tes recherches.`;
               send({ type: "sources", sources: result.sources });
             }
           } catch (searchError) {
-            console.error("Recherche web Mistral indisponible, repli sans recherche :", searchError);
-            send({
-              type: "status",
-              message: "Recherche web indisponible : rédaction avec les connaissances du modèle.",
-            });
-            researchBrief = "";
+            console.error("Recherche web Mistral indisponible :", searchError);
+            const errMsg = searchError instanceof Error ? searchError.message : String(searchError);
+            throw new Error(`Recherche web échouée : impossible de générer un script fiable sans données vérifiées. Détail : ${errMsg}`);
           }
         }
 

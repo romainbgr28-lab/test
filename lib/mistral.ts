@@ -93,7 +93,7 @@ export async function callMistralChat(params: MistralChatParams): Promise<string
     body: JSON.stringify({
       model: params.model,
       messages: params.messages,
-      temperature: params.temperature ?? 0.8,
+      temperature: params.temperature ?? 0.3,
     }),
   });
 
