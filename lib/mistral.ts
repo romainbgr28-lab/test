@@ -53,9 +53,11 @@ RÈGLES DE NARRATION :
 RÈGLE ABSOLUE SUR LES FAITS :
 Une NOTE DE RECHERCHE te sera fournie avec des faits, chiffres et informations réelles et vérifiées.
 - Utilise UNIQUEMENT les faits présents dans cette note. N'en invente aucun.
-- Si tu cites un chiffre, une date, un événement ou une personne, il doit être explicitement mentionné dans la note.
+- Si tu cites un chiffre, une date, un événement ou une personne, il doit être EXPLICITEMENT mentionné dans la note.
 - N'extrapole pas, ne complète pas de mémoire : si l'information n'est pas dans la note, ne l'utilise pas.
-- Ne fabrique jamais de statistiques, résultats sportifs, classements ou événements non confirmés dans la note.
+- Ne fabrique JAMAIS : statistiques, résultats sportifs, scores, classements, blessures, transferts, salaires, contrats ou événements non confirmés dans la note.
+- Si la note signale qu'une information du sujet est incorrecte ou périmée (joueur transféré, record battu, etc.), adapte le script à la réalité vérifiée.
+- Un fait douteux vaut mieux formulé vaguement ("une blessure grave", "plusieurs semaines d'arrêt") que formulé faux.
 
 Instructions de niche / sujet du script (à respecter scrupuleusement) : ${params.scriptInstructions}
 ${params.viralityInstructions?.trim() ? `Instructions de viralité et de format à privilégier pour ce profil : ${params.viralityInstructions.trim()}\n` : ""}Plateforme : ${platformLabel}
@@ -204,12 +206,19 @@ export async function groundScriptToResearch(params: {
   script: string;
   researchBrief: string;
 }): Promise<string> {
-  const systemPrompt = `Tu es un vérificateur de faits strict. Ton seul rôle est de relire un script et de supprimer ou remplacer tout fait précis qui n'est PAS explicitement mentionné dans la NOTE DE RECHERCHE fournie.
+  const systemPrompt = `Tu es un vérificateur de faits strict. Ton seul rôle est de relire un script et de corriger ou supprimer tout fait précis qui n'est PAS explicitement mentionné dans la NOTE DE RECHERCHE fournie.
 
-RÈGLES :
-- Chiffres, dates, noms propres, types de blessure, résultats, classements → vérifie chacun dans la note. S'il n'y est pas : supprime-le ou remplace-le par une formulation vague ("une blessure grave", "plusieurs semaines d'arrêt"…).
+RÈGLES DE VÉRIFICATION (vérifie chaque élément un par un) :
+- Noms propres (joueurs, clubs, entreprises, personnes) → présents dans la note ? Équipe actuelle correcte ? Si non : corrige ou supprime.
+- Chiffres, pourcentages, statistiques → présents mot pour mot dans la note ? Si non : supprime ou remplace par "des chiffres record", "une hausse significative"…
+- Dates et périodes → confirmées dans la note ? Si non : vague ou supprimées.
+- Types de blessures, résultats, scores, classements → chacun doit être dans la note. Sinon : formuler vaguement.
+- Transferts, contrats, salaires → vérifiés dans la note uniquement.
+
+COMPORTEMENT :
 - Ne remplace jamais un fait manquant par un autre fait inventé.
-- Préserve le style, le rythme et la structure du script. Ne réécris que ce qui est factuellement incorrect ou non vérifié.
+- Si la note signale une erreur factuelle dans le script (ex : joueur qui n'est plus dans cette équipe), corrige-la.
+- Préserve le style, le rythme TikTok et la structure du script. Ne réécris que ce qui est faux ou non vérifié.
 - Réponds UNIQUEMENT avec le script corrigé, sans commentaire ni JSON.`;
 
   const userPrompt = `NOTE DE RECHERCHE :

@@ -134,13 +134,28 @@ export async function POST(request: Request) {
           const researchQuery = `Sujet à rechercher : "${subject}".
 Contexte / niche : ${scriptInstructions}
 Plateforme cible : ${platformLabel}.
+Date du jour : ${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}.
 
-Effectue plusieurs recherches web et rédige une NOTE DE RECHERCHE dense et factuelle (pas un script, pas de JSON) contenant :
-- 6 à 10 faits, chiffres et statistiques RÉCENTS et vérifiables (précise l'ordre de grandeur, l'année et la source quand c'est possible)
-- les angles, accroches et tendances qui fonctionnent actuellement sur ce sujet
-- des exemples concrets, anecdotes ou cas réels marquants
-- les idées reçues à casser ou les vérités contre-intuitives
-N'invente aucune donnée : tout doit provenir de tes recherches.`;
+ÉTAPE 1 — VÉRIFICATION DE L'ÉTAT ACTUEL (obligatoire avant tout autre chose) :
+Identifie toutes les personnes, équipes, entreprises, produits ou événements mentionnés dans le sujet.
+Pour chacun, effectue une recherche web SPÉCIFIQUE pour confirmer :
+- Si c'est un sportif : équipe actuelle, statut (actif/blessé/retraité), derniers résultats
+- Si c'est une entreprise : statut actuel, dernière actualité significative
+- Si c'est un événement : est-il passé, en cours ou à venir ?
+- Si c'est une statistique : date de publication, source officielle
+IMPORTANT : si une information ne peut pas être vérifiée, ne l'utilise PAS dans la note.
+
+ÉTAPE 2 — COLLECTE DES FAITS (après vérification) :
+Rédige une NOTE DE RECHERCHE dense et factuelle (pas un script, pas de JSON) contenant :
+- 6 à 10 faits, chiffres et statistiques CONFIRMÉS par tes recherches (précise la date et la source)
+- L'état ACTUEL et VÉRIFIÉ de chaque élément clé mentionné dans le sujet
+- Les angles et tendances qui fonctionnent sur ${platformLabel} EN CE MOMENT
+- Des exemples concrets, anecdotes ou cas réels récents (moins de 6 mois si possible)
+- Les idées reçues à casser ou les vérités contre-intuitives VÉRIFIÉES
+- Signal d'alerte : si tu trouves que certaines prémisses du sujet sont fausses (joueur transféré, entreprise coulée, record battu…), INDIQUE-LE CLAIREMENT en début de note.
+
+N'invente AUCUNE donnée : tout ce qui figure dans la note doit provenir de tes recherches actuelles.`;
+`;
 
           try {
             const result = await withHeartbeat(
