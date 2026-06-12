@@ -193,6 +193,48 @@ export async function callMistralWithWebSearch(params: MistralWebSearchParams): 
   return { text, searchQueries: [...new Set(searchQueries)], sources: [...new Set(sources)] };
 }
 
+/**
+ * Runs a fact-grounding pass: strips every specific claim in `script` that
+ * cannot be found verbatim or by clear implication in `researchBrief`.
+ * Returns the corrected script as a plain string.
+ */
+export async function groundScriptToResearch(params: {
+  apiKey: string;
+  model: string;
+  script: string;
+  researchBrief: string;
+}): Promise<string> {
+  const systemPrompt = `Tu es un vérificateur de faits strict. Ton seul rôle est de relire un script et de supprimer ou remplacer tout fait précis qui n'est PAS explicitement mentionné dans la NOTE DE RECHERCHE fournie.
+
+RÈGLES :
+- Chiffres, dates, noms propres, types de blessure, résultats, classements → vérifie chacun dans la note. S'il n'y est pas : supprime-le ou remplace-le par une formulation vague ("une blessure grave", "plusieurs semaines d'arrêt"…).
+- Ne remplace jamais un fait manquant par un autre fait inventé.
+- Préserve le style, le rythme et la structure du script. Ne réécris que ce qui est factuellement incorrect ou non vérifié.
+- Réponds UNIQUEMENT avec le script corrigé, sans commentaire ni JSON.`;
+
+  const userPrompt = `NOTE DE RECHERCHE :
+"""
+${params.researchBrief}
+"""
+
+SCRIPT À VÉRIFIER :
+"""
+${params.script}
+"""
+
+Renvoie le script corrigé.`;
+
+  return callMistralChat({
+    apiKey: params.apiKey,
+    model: params.model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0,
+  });
+}
+
 export function extractJson<T>(raw: string): T {
   const trimmed = raw.trim();
   const start = trimmed.indexOf("{");
