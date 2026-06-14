@@ -20,6 +20,14 @@ export interface VisualStyle {
   createdAt: string;
 }
 
+export interface ImageSlot {
+  id: string;
+  prompt: string;
+  referenceImage?: string;
+  imageUrl?: string;
+  motionVideoUrl?: string;
+}
+
 export interface VideoSegment {
   id: string;
   order: number;
@@ -28,8 +36,11 @@ export interface VideoSegment {
   duration: number;
   imageUrl?: string;
   imageBlob?: string;
+  imageUrls?: string[];
   isSceneVariation?: boolean;
   imagePrompt?: string;
+  imageSlots?: ImageSlot[];
+  imageCount?: number;
 }
 
 export interface ViralityScore {
@@ -43,6 +54,23 @@ export interface ViralityScore {
 export interface PublishMetadata {
   caption: string;
   hashtags: string[];
+  title?: string;
+  description?: string;
+  bestPostTime?: string;
+  nextVideoIdeas?: string[];
+}
+
+export interface VideoIdea {
+  title: string;
+  hook: string;
+  angle: string;
+  monetizationPotential: string;
+  trendScore: number;
+}
+
+export interface HookVariant {
+  narration: string;
+  style: string;
 }
 
 export type SubtitleStyle = "karaoke" | "block" | "bottom" | "none";
@@ -68,6 +96,9 @@ export interface VideoProject {
   imageModel: string;
   viralityScore?: ViralityScore;
   publishMetadata?: PublishMetadata;
+  subtitles?: SubtitleEntry[];
+  researchSources?: string[];
+  audioDuration?: number;
   createdAt: string;
 }
 
@@ -128,4 +159,17 @@ export interface SubtitleEntry {
   start: number;
   end: number;
   text: string;
+}
+
+export interface Clip {
+  id: string;
+  segmentId: string;
+  segmentOrder: number;
+  beatIndex: number;
+  imageUrl: string;
+  duration: number;
+  narration: string;
+  motionVideoUrl?: string;
+  videoTrimStart?: number; // seconds into the source video
+  videoTrimEnd?: number;   // seconds into the source video
 }

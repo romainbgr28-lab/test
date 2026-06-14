@@ -37,34 +37,27 @@ PRINCIPES PSYCHOLOGIQUES QUE TU APPLIQUES SYSTÉMATIQUEMENT :
 - Micro-engagements : poser des questions auxquelles le spectateur répond mentalement "oui" pour créer une validation continue
 
 STRUCTURE OBLIGATOIRE POUR ${params.duration} SECONDES :
-- Segment 1 (3s max) : Hook. Une phrase choc. Chiffre, question provocante ou affirmation contre-intuitive. Jamais plus de 15 mots.
-- Segments 2 à N-1 : Corps. Chaque segment = une idée, une preuve, une révélation. Durée : 6 à 8 secondes chacun. Créer un micro-cliffhanger à la fin de chaque segment.
-- Dernier segment (5s) : CTA. Direct, simple, une seule action demandée.
+- Ligne 1 (hook) : Une phrase choc. Chiffre, question provocante ou affirmation contre-intuitive. Jamais plus de 15 mots.
+- Corps : Chaque phrase = une idée, une preuve, une révélation. Créer un micro-cliffhanger toutes les 2-3 phrases.
+- Dernière ligne (CTA) : Direct, simple, une seule action demandée.
 
-CALCUL OBLIGATOIRE : Pour ${params.duration} secondes tu DOIS générer exactement le nombre de segments nécessaires pour atteindre cette durée.
-Exemple : 60 secondes = hook 3s + 7 segments de 7s + CTA 5s = 9 segments minimum.
-Exemple : 90 secondes = hook 3s + 11 segments de 7s + CTA 5s = 13 segments minimum.
-Ne génère JAMAIS moins de segments que nécessaire. Compte les secondes avant de répondre.
+CALCUL OBLIGATOIRE : Pour ${params.duration} secondes à 2,5 mots par seconde = environ ${Math.round(params.duration * 2.5)} mots au total. Compte les mots avant de répondre. Ne génère pas moins.
 
 RÈGLES DE NARRATION :
 - Phrases courtes. Maximum 20 mots par phrase.
 - Rythme TikTok : une idée = une phrase = une respiration
 - Utiliser "tu" pas "vous"
 - Jamais de transition molle ("ensuite", "puis", "donc"). Transitions chocs : "Mais voilà le truc.", "Et c'est là que ça devient fou.", "La plupart des gens ignorent ça."
-- Chaque narration doit pouvoir se lire en exactement {segment_duration} secondes à voix haute (environ 2,5 mots par seconde)
+- Environ 2,5 mots par seconde à voix haute
 
-RÈGLES VISUELLES :
-- La description visuelle doit être en anglais, très précise, style prompt Midjourney
-- Spécifier : sujet principal, éclairage, couleurs dominantes, style (cinématique, minimaliste, etc.), émotion recherchée
-- Les visuels doivent RENFORCER la narration, pas juste l'illustrer
-- Varier les types de plans : close-up, wide shot, abstract, data visualization, metaphor visuelle
-
-RECHERCHE WEB OBLIGATOIRE :
-Tu as accès à un outil de recherche internet en temps réel. Utilise-le systématiquement avant de rédiger pour :
-- trouver les tendances, sujets chauds et formulations qui cartonnent en ce moment sur ce thème et sur cette plateforme
-- collecter des chiffres, statistiques et faits récents et vérifiables à intégrer dans la narration pour renforcer la crédibilité et l'effet "wahou"
-- repérer les angles et accroches qui fonctionnent déjà sur des contenus similaires, pour t'en inspirer sans copier
-N'invente jamais une statistique : si tu avances un chiffre, il doit provenir d'une recherche réelle.
+RÈGLE ABSOLUE SUR LES FAITS :
+Une NOTE DE RECHERCHE te sera fournie avec des faits, chiffres et informations réelles et vérifiées.
+- Utilise UNIQUEMENT les faits présents dans cette note. N'en invente aucun.
+- Si tu cites un chiffre, une date, un événement ou une personne, il doit être EXPLICITEMENT mentionné dans la note.
+- N'extrapole pas, ne complète pas de mémoire : si l'information n'est pas dans la note, ne l'utilise pas.
+- Ne fabrique JAMAIS : statistiques, résultats sportifs, scores, classements, blessures, transferts, salaires, contrats ou événements non confirmés dans la note.
+- Si la note signale qu'une information du sujet est incorrecte ou périmée (joueur transféré, record battu, etc.), adapte le script à la réalité vérifiée.
+- Un fait douteux vaut mieux formulé vaguement ("une blessure grave", "plusieurs semaines d'arrêt") que formulé faux.
 
 Instructions de niche / sujet du script (à respecter scrupuleusement) : ${params.scriptInstructions}
 ${params.viralityInstructions?.trim() ? `Instructions de viralité et de format à privilégier pour ce profil : ${params.viralityInstructions.trim()}\n` : ""}Plateforme : ${platformLabel}
@@ -81,14 +74,7 @@ FORMAT DE RÉPONSE : JSON strict uniquement, aucun texte avant ou après.
     "ctaClarity": "[analyse en 1 phrase]",
     "suggestions": ["suggestion 1", "suggestion 2", "suggestion 3"]
   },
-  "segments": [
-    {
-      "order": 1,
-      "narration": "[texte exact à lire]",
-      "visualDescription": "[prompt visuel en anglais]",
-      "duration": [durée en secondes, entier]
-    }
-  ]
+  "script": "[texte complet du script à lire, en une seule chaîne de caractères. Chaque phrase sur une nouvelle ligne (\\n). Ne pas inclure de balises ou de marqueurs de segment.]"
 }`;
 }
 
@@ -109,7 +95,7 @@ export async function callMistralChat(params: MistralChatParams): Promise<string
     body: JSON.stringify({
       model: params.model,
       messages: params.messages,
-      temperature: params.temperature ?? 0.8,
+      temperature: params.temperature ?? 0.3,
     }),
   });
 
@@ -207,6 +193,55 @@ export async function callMistralWithWebSearch(params: MistralWebSearchParams): 
   }
 
   return { text, searchQueries: [...new Set(searchQueries)], sources: [...new Set(sources)] };
+}
+
+/**
+ * Runs a fact-grounding pass: strips every specific claim in `script` that
+ * cannot be found verbatim or by clear implication in `researchBrief`.
+ * Returns the corrected script as a plain string.
+ */
+export async function groundScriptToResearch(params: {
+  apiKey: string;
+  model: string;
+  script: string;
+  researchBrief: string;
+}): Promise<string> {
+  const systemPrompt = `Tu es un vérificateur de faits strict. Ton seul rôle est de relire un script et de corriger ou supprimer tout fait précis qui n'est PAS explicitement mentionné dans la NOTE DE RECHERCHE fournie.
+
+RÈGLES DE VÉRIFICATION (vérifie chaque élément un par un) :
+- Noms propres (joueurs, clubs, entreprises, personnes) → présents dans la note ? Équipe actuelle correcte ? Si non : corrige ou supprime.
+- Chiffres, pourcentages, statistiques → présents mot pour mot dans la note ? Si non : supprime ou remplace par "des chiffres record", "une hausse significative"…
+- Dates et périodes → confirmées dans la note ? Si non : vague ou supprimées.
+- Types de blessures, résultats, scores, classements → chacun doit être dans la note. Sinon : formuler vaguement.
+- Transferts, contrats, salaires → vérifiés dans la note uniquement.
+
+COMPORTEMENT :
+- Ne remplace jamais un fait manquant par un autre fait inventé.
+- Si la note signale une erreur factuelle dans le script (ex : joueur qui n'est plus dans cette équipe), corrige-la.
+- Préserve le style, le rythme TikTok et la structure du script. Ne réécris que ce qui est faux ou non vérifié.
+- Réponds UNIQUEMENT avec le script corrigé, sans commentaire ni JSON.`;
+
+  const userPrompt = `NOTE DE RECHERCHE :
+"""
+${params.researchBrief}
+"""
+
+SCRIPT À VÉRIFIER :
+"""
+${params.script}
+"""
+
+Renvoie le script corrigé.`;
+
+  return callMistralChat({
+    apiKey: params.apiKey,
+    model: params.model,
+    messages: [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userPrompt },
+    ],
+    temperature: 0,
+  });
 }
 
 export function extractJson<T>(raw: string): T {

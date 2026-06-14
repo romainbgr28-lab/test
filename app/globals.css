@@ -3,8 +3,8 @@
 @tailwind utilities;
 
 :root {
-  --border: 0 0% 20%;
-  --input: 0 0% 20%;
+  --border: 0 0% 18%;
+  --input: 0 0% 18%;
   --ring: 263 70% 60%;
 }
 
@@ -14,31 +14,75 @@
 
 html {
   color-scheme: dark;
+  scroll-behavior: smooth;
 }
 
 body {
-  background-color: #0a0a0a;
-  color: #f5f5f5;
+  background-color: #080808;
+  color: #f0f0f0;
+  font-feature-settings: "cv02", "cv03", "cv04", "cv11";
 }
 
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #0a0a0a;
-}
-::-webkit-scrollbar-thumb {
-  background: #2e2e2e;
-  border-radius: 9999px;
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #2a2a2a; border-radius: 9999px; }
+::-webkit-scrollbar-thumb:hover { background: #3a3a3a; }
+
+/* ── Focus ring ── */
+:focus-visible {
+  outline: 2px solid #8b5cf6;
+  outline-offset: 2px;
 }
 
+/* ── Skeleton ── */
 .skeleton {
-  background: linear-gradient(90deg, #1a1a1a 25%, #242424 37%, #1a1a1a 63%);
+  background: linear-gradient(90deg, #181818 25%, #222222 37%, #181818 63%);
   background-size: 400% 100%;
   animation: skeleton-loading 1.4s ease infinite;
 }
 @keyframes skeleton-loading {
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
+}
+
+/* ── Glow utilities ── */
+@layer utilities {
+  .glow-primary {
+    box-shadow: 0 0 20px rgba(139, 92, 246, 0.25);
+  }
+  .glow-primary-sm {
+    box-shadow: 0 0 10px rgba(139, 92, 246, 0.18);
+  }
+  .gradient-text {
+    background: linear-gradient(135deg, #a78bfa, #818cf8);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
+  .step-active-bg {
+    background: linear-gradient(135deg, rgba(139,92,246,0.12), rgba(99,102,241,0.06));
+  }
+}
+
+/* ── Range input ── */
+input[type="range"] {
+  height: 4px;
+  cursor: pointer;
+  border-radius: 9999px;
+}
+input[type="range"]::-webkit-slider-thumb {
+  width: 16px;
+  height: 16px;
+  border-radius: 9999px;
+  cursor: pointer;
+  -webkit-appearance: none;
+  background: #8b5cf6;
+  box-shadow: 0 0 6px rgba(139,92,246,0.4);
+}
+
+/* ── Transition defaults ── */
+button, a, input, textarea, select {
+  transition-duration: 150ms;
+  transition-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
 }

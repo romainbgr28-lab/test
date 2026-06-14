@@ -3,17 +3,17 @@
 import * as React from "react";
 import { Wand2 } from "lucide-react";
 import type {
+  Clip,
   ImageModel,
-  Language,
-  MistralModel,
-  NicheProfile,
-  Platform,
+  ImageSlot,
   PublishMetadata,
+  SubtitleEntry,
   VideoProject,
   VideoSegment,
   ViralityScore,
   VisualStyle,
 } from "@/types";
+import { buildClipsFromSegments, syncClipsToAudio, generateSubtitlesFromClips } from "@/lib/clips";
 import { Stepper, type StepDefinition } from "./components/ui/Stepper";
 import { CostBadge } from "./components/ui/CostBadge";
 import { StepConfig, type StepConfigState } from "./components/steps/StepConfig";
@@ -23,42 +23,28 @@ import { StepVoice } from "./components/steps/StepVoice";
 import { StepVideo } from "./components/steps/StepVideo";
 import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
-import { uid } from "@/lib/utils";
+import { ApiKeyQuickEdit } from "./components/ui/ApiKeyQuickEdit";
+import { uid, compressImageDataUrl } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
-import { buildSceneContinuityPrompt, getDimensionsForPlatform } from "@/lib/pollinations";
+import { buildSceneContinuityPrompt, buildSubSegmentPrompts, getDimensionsForPlatform } from "@/lib/pollinations";
 import { syncSegmentsToAudio } from "@/lib/sync";
+import { detectPhrasesFromAudio, splitScriptIntoSentences, mapSentencesToPhrases } from "@/lib/audio-analysis";
 
 const STEPS: StepDefinition[] = [
   { index: 0, title: "Configuration" },
   { index: 1, title: "Script" },
-  { index: 2, title: "Images" },
-  { index: 3, title: "Voix off" },
+  { index: 2, title: "Voix off" },
+  { index: 3, title: "Images" },
   { index: 4, title: "Aperçu" },
   { index: 5, title: "Export" },
 ];
 
-interface RawSegment {
-  order: number;
-  narration: string;
-  visualDescription: string;
-  duration: number;
-}
-
-function toSegment(raw: RawSegment): VideoSegment {
-  return {
-    id: uid(),
-    order: raw.order,
-    narration: raw.narration,
-    visualDescription: raw.visualDescription,
-    duration: raw.duration,
-  };
-}
 
 export default function Home() {
   const { toast } = useToast();
 
   const [currentStep, setCurrentStep] = React.useState(0);
-  const [unlockedStep, setUnlockedStep] = React.useState(STEPS.length - 1);
+  const [unlockedStep, setUnlockedStep] = React.useState(0);
 
   const [config, setConfig] = React.useState<StepConfigState>({
     subject: "",
@@ -77,18 +63,25 @@ export default function Home() {
   const [generatingScript, setGeneratingScript] = React.useState(false);
   const [scriptProgress, setScriptProgress] = React.useState<{ message: string; score?: number }[]>([]);
   const [viralityScore, setViralityScore] = React.useState<ViralityScore | null>(null);
+  const [scriptText, setScriptText] = React.useState("");
   const [segments, setSegments] = React.useState<VideoSegment[]>([]);
-  const [regeneratingSegmentId, setRegeneratingSegmentId] = React.useState<string | null>(null);
   const [scriptValidated, setScriptValidated] = React.useState(false);
+  const [validatingScript, setValidatingScript] = React.useState(false);
+  const [researchSources, setResearchSources] = React.useState<string[]>([]);
 
   const [imageModel, setImageModel] = React.useState<ImageModel>("");
   const [generatingImages, setGeneratingImages] = React.useState(false);
   const [imageLoadingIds, setImageLoadingIds] = React.useState<Set<string>>(new Set());
+  const [videoLoadingIds, setVideoLoadingIds] = React.useState<Set<string>>(new Set());
   const [selectedVisualStyleId, setSelectedVisualStyleId] = React.useState<string | null>(null);
   const [selectedVisualStyle, setSelectedVisualStyle] = React.useState<VisualStyle | null>(null);
 
   const [voiceoverUrl, setVoiceoverUrl] = React.useState<string | undefined>(undefined);
   const [audioDuration, setAudioDuration] = React.useState<number>(0);
+  const [subtitles, setSubtitles] = React.useState<SubtitleEntry[]>([]);
+  const [clips, setClips] = React.useState<Clip[]>([]);
+  const [beatDuration, setBeatDuration] = React.useState(2.5);
+  const [generatingPrompts, setGeneratingPrompts] = React.useState(false);
 
   const [publishMetadata, setPublishMetadata] = React.useState<PublishMetadata | undefined>(undefined);
   const [generatingMetadata, setGeneratingMetadata] = React.useState(false);
@@ -102,7 +95,7 @@ export default function Home() {
     segmentCount: segments.length || 0,
   });
 
-  const scriptCharCount = segments.reduce((acc, s) => acc + s.narration.length, 0);
+  const scriptCharCount = scriptText.length;
   const voiceCost = estimateVoiceCost(scriptCharCount);
 
   function updateConfig(patch: Partial<StepConfigState>) {
@@ -118,8 +111,10 @@ export default function Home() {
     setGeneratingScript(true);
     setViralityScore(null);
     setSegments([]);
+    setScriptText("");
     setScriptValidated(false);
     setScriptProgress([]);
+    setResearchSources([]);
     setUnlockedStep((u) => Math.max(u, 1));
     setCurrentStep(1);
     try {
@@ -147,7 +142,7 @@ export default function Home() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let buffer = "";
-      let result: { viralityScore: ViralityScore; segments: RawSegment[] } | null = null;
+      let result: { viralityScore: ViralityScore; script: string } | null = null;
       let streamError: string | null = null;
 
       while (true) {
@@ -165,13 +160,16 @@ export default function Home() {
             type: string;
             message?: string;
             score?: number;
+            sources?: string[];
             viralityScore?: ViralityScore;
-            segments?: RawSegment[];
+            script?: string;
           };
-          if (event.type === "status" && event.message) {
+          if (event.type === "sources" && Array.isArray(event.sources)) {
+            setResearchSources(event.sources);
+          } else if (event.type === "status" && event.message) {
             setScriptProgress((prev) => [...prev, { message: event.message!, score: event.score }]);
-          } else if (event.type === "result" && event.viralityScore && event.segments) {
-            result = { viralityScore: event.viralityScore, segments: event.segments };
+          } else if (event.type === "result" && event.viralityScore && event.script) {
+            result = { viralityScore: event.viralityScore, script: event.script };
           } else if (event.type === "error" && event.message) {
             streamError = event.message;
           }
@@ -182,10 +180,10 @@ export default function Home() {
       if (!result) throw new Error("Aucun script n'a été généré.");
 
       setViralityScore(result.viralityScore);
-      setSegments(result.segments.map(toSegment));
+      setScriptText(result.script);
       setCurrentStep(1);
       setUnlockedStep((u) => Math.max(u, 1));
-      toast({ title: "Script généré !", description: "Relis et ajuste les segments avant de valider.", variant: "success" });
+      toast({ title: "Script généré !", description: "Relis et modifie le script, puis valide.", variant: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
       toast({ title: "Échec de la génération du script", description: message, variant: "error" });
@@ -194,73 +192,84 @@ export default function Home() {
     }
   }
 
-  function handleSegmentChange(id: string, patch: Partial<VideoSegment>) {
-    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, ...patch } : s)));
-  }
-
-  async function handleRegenerateSegment(id: string) {
-    if (!config.profile) return;
-    const segment = segments.find((s) => s.id === id);
-    if (!segment) return;
-    setRegeneratingSegmentId(id);
+  async function handleValidateScript() {
+    if (!scriptText.trim()) return;
+    setValidatingScript(true);
     try {
-      const response = await fetch("/api/generate-script", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          subject: config.subject,
-          platform: config.platform,
-          language: config.language,
-          scriptInstructions: config.profile.scriptInstructions,
-          viralityInstructions: config.profile.viralityInstructions || undefined,
-          duration: config.duration,
-          model: config.mistralModel,
-          apiKey: config.mistralApiKey || undefined,
-          regenerateSegmentOrder: segment.order,
-          existingSegment: {
-            order: segment.order,
-            narration: segment.narration,
-            visualDescription: segment.visualDescription,
-            duration: segment.duration,
-          },
-        }),
+      const words = scriptText.trim().split(/\s+/).length;
+      const estimatedDuration = words / 2.5;
+      const segmentCount = Math.max(1, Math.ceil(estimatedDuration / 3));
+      const chunkDuration = estimatedDuration / segmentCount;
+
+      // Split script into segments without generating image prompts yet
+      // (prompts are generated AFTER audio is loaded so durations are accurate)
+      const lines = scriptText.split("\n").filter((l) => l.trim());
+      const chunksText: string[] = [];
+      const linesPerChunk = Math.ceil(lines.length / segmentCount);
+      for (let i = 0; i < segmentCount; i++) {
+        chunksText.push(lines.slice(i * linesPerChunk, (i + 1) * linesPerChunk).join(" ").trim() || scriptText);
+      }
+
+      const newSegments: VideoSegment[] = chunksText.map((narration, i) => ({
+        id: uid(),
+        order: i + 1,
+        narration,
+        visualDescription: "",
+        duration: Math.round(chunkDuration * 10) / 10,
+        imagePrompt: "",
+      }));
+
+      setSegments(newSegments);
+      setScriptValidated(true);
+      setCurrentStep(2);
+      setUnlockedStep((u) => Math.max(u, 2));
+      toast({
+        title: "Script validé !",
+        description: `${segmentCount} segments créés. Charge ta voix off pour caler les durées.`,
+        variant: "success",
       });
-      const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la régénération du segment.");
-      const raw = data.segment as RawSegment;
-      handleSegmentChange(id, {
-        narration: raw.narration,
-        visualDescription: raw.visualDescription,
-        duration: raw.duration,
-      });
-      toast({ title: `Segment ${segment.order} régénéré`, variant: "success" });
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: "Échec de la régénération", description: message, variant: "error" });
+      toast({ title: "Échec de la validation", description: message, variant: "error" });
     } finally {
-      setRegeneratingSegmentId(null);
+      setValidatingScript(false);
     }
   }
 
-  function handleValidateScript() {
-    setScriptValidated(true);
-    setCurrentStep(2);
-    setUnlockedStep((u) => Math.max(u, 2));
-    toast({ title: "Script validé", description: "Passe à la génération des assets.", variant: "success" });
-  }
+  async function generateImagePrompts(syncedSegments: VideoSegment[]): Promise<VideoSegment[]> {
+    const imageCount = syncedSegments.length;
+    const scriptText = syncedSegments
+      .slice()
+      .sort((a, b) => a.order - b.order)
+      .map((s) => s.narration)
+      .join("\n");
 
-  function getEffectivePrompt(index: number): { prompt: string; isVariation: boolean; referenceImages?: string[] } {
-    const segment = segments[index];
-    const { prompt: suggested, isVariation } = buildSceneContinuityPrompt(segments, index);
-    const base = segment.imagePrompt?.trim() || suggested;
-    const referenceImages = selectedVisualStyle?.referenceImages?.length
-      ? selectedVisualStyle.referenceImages
-      : undefined;
-    return { prompt: base, isVariation, referenceImages };
-  }
+    const response = await fetch("/api/generate-image-prompts", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        scriptText,
+        imageCount,
+        platform: config.platform,
+        language: config.language,
+        model: config.mistralModel,
+        apiKey: config.mistralApiKey || undefined,
+        stylePrompt: selectedVisualStyle?.stylePrompt || undefined,
+      }),
+    });
+    const data = await response.json();
+    if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération des prompts d'images.");
+    const prompts = data.prompts as string[];
 
-  function handleSegmentPromptChange(id: string, imagePrompt: string) {
-    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
+    // Initialiser les slots par segment avec des prompts distincts
+    return syncedSegments.map((seg, i) => {
+      const basePrompt = prompts[i] ?? seg.visualDescription;
+      const count = seg.imageCount ?? Math.max(1, Math.ceil(seg.duration / 3));
+      const stylePrompt = selectedVisualStyle?.stylePrompt;
+      const subPrompts = buildSubSegmentPrompts({ ...seg, imagePrompt: basePrompt }, count, stylePrompt);
+      const slots: ImageSlot[] = subPrompts.map((p) => ({ id: uid(), prompt: p }));
+      return { ...seg, visualDescription: basePrompt, imagePrompt: basePrompt, imageSlots: slots };
+    });
   }
 
   function handleSelectVisualStyle(style: VisualStyle | null) {
@@ -268,134 +277,329 @@ export default function Home() {
     setSelectedVisualStyleId(style?.id ?? null);
   }
 
-  async function generateImageForSegment(
-    segment: VideoSegment,
-    promptOverride: string,
-    referenceImages?: string[],
-    seedOverride?: number
-  ): Promise<string | null> {
-    if (!config.profile) return null;
+  function handleImageCountChange(segId: string, count: number) {
+    const newCount = Math.max(1, Math.min(10, count));
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId) return s;
+        const stylePrompt = selectedVisualStyle?.stylePrompt;
+        const subPrompts = buildSubSegmentPrompts(s, newCount, stylePrompt);
+        const existing = s.imageSlots ?? [];
+        const newSlots: ImageSlot[] = Array.from({ length: newCount }, (_, i) => ({
+          id: existing[i]?.id ?? uid(),
+          prompt: existing[i]?.prompt ?? subPrompts[i] ?? s.imagePrompt ?? "",
+          referenceImage: existing[i]?.referenceImage,
+          imageUrl: existing[i]?.imageUrl,
+        }));
+        return { ...s, imageCount: newCount, imageSlots: newSlots };
+      })
+    );
+  }
+
+  function handleSlotPromptChange(segId: string, slotIdx: number, prompt: string) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) => (i === slotIdx ? { ...slot, prompt } : slot));
+        return { ...s, imageSlots: slots };
+      })
+    );
+  }
+
+  function handleSlotReferenceChange(segId: string, slotIdx: number, referenceImage: string | undefined) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) => (i === slotIdx ? { ...slot, referenceImage } : slot));
+        return { ...s, imageSlots: slots };
+      })
+    );
+  }
+
+  async function generateOneSlot(segment: VideoSegment, slotIdx: number): Promise<string | null> {
+    const slot = segment.imageSlots?.[slotIdx];
+    if (!slot) return null;
     const dimensions = getDimensionsForPlatform(config.platform);
-    const seed = seedOverride ?? segment.order * 1000;
+    const styleRefs = selectedVisualStyle?.referenceImages?.length ? selectedVisualStyle.referenceImages : [];
+    const rawRefs = slot.referenceImage ? [slot.referenceImage, ...styleRefs] : styleRefs.length ? styleRefs : undefined;
+    const seed = segment.order * 1000 + slotIdx * 137;
     try {
+      // Compress reference images before sending to avoid 413 Payload Too Large
+      const referenceImages = rawRefs
+        ? await Promise.all(rawRefs.map((r) => compressImageDataUrl(r)))
+        : undefined;
+
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: promptOverride,
+          prompt: slot.prompt,
           model: imageModel,
           width: dimensions.width,
           height: dimensions.height,
           seed,
           apiKey: config.leonardoApiKey || undefined,
-          referenceImages: referenceImages || undefined,
+          referenceImages,
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur lors de la génération de l'image.");
+      if (!response.ok) {
+        const raw: string = data?.error ?? "Erreur génération image";
+        // Make common HTTP errors more readable
+        const msg =
+          response.status === 413
+            ? "L'image de référence est trop volumineuse même après compression. Essaie avec une image plus petite."
+            : response.status === 401
+            ? "Clé API Leonardo invalide ou manquante. Vérifie ta clé dans les paramètres (bouton clé en bas à droite)."
+            : response.status === 402
+            ? "Crédits Leonardo insuffisants. Recharge ton compte sur app.leonardo.ai."
+            : response.status === 429
+            ? "Limite de requêtes Leonardo atteinte. Attends quelques secondes et réessaie."
+            : response.status === 502
+            ? `Erreur côté Leonardo (${response.status}) : ${raw}`
+            : raw;
+        throw new Error(msg);
+      }
       return data.imageUrl as string;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
-      toast({ title: `Échec image segment ${segment.order}`, description: message, variant: "error" });
+      toast({ title: `Échec image ${segment.order}-${slotIdx + 1}`, description: message, variant: "error" });
       return null;
     }
   }
 
+  function applySlotResults(segId: string, slotResults: (string | null)[]) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) =>
+          slotResults[i] ? { ...slot, imageUrl: slotResults[i]! } : slot
+        );
+        const imageUrls = slots.map((sl) => sl.imageUrl).filter(Boolean) as string[];
+        return { ...s, imageSlots: slots, imageUrl: imageUrls[0], imageBlob: imageUrls[0], imageUrls };
+      })
+    );
+  }
+
   async function handleGenerateAllImages() {
     setGeneratingImages(true);
-    setImageLoadingIds(new Set(segments.map((s) => s.id)));
+    const allSlotIds = new Set(
+      segments.flatMap((s) => (s.imageSlots ?? []).map((_, i) => `${s.id}-${i}`))
+    );
+    setImageLoadingIds(allSlotIds);
     try {
-      const results = await Promise.all(
-        segments.map(async (segment, index) => {
-          const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
-          const imageUrl = await generateImageForSegment(segment, prompt, referenceImages);
-          return { id: segment.id, imageUrl, isVariation };
+      await Promise.all(
+        segments.map(async (segment) => {
+          if (!segment.imageSlots?.length) return;
+          const results = await Promise.all(
+            segment.imageSlots.map((_, i) => generateOneSlot(segment, i))
+          );
+          applySlotResults(segment.id, results);
+          setImageLoadingIds((prev) => {
+            const next = new Set(prev);
+            segment.imageSlots!.forEach((_, i) => next.delete(`${segment.id}-${i}`));
+            return next;
+          });
         })
       );
-      setSegments((prev) =>
-        prev.map((s) => {
-          const result = results.find((r) => r.id === s.id);
-          if (result?.imageUrl) {
-            return { ...s, imageUrl: result.imageUrl, imageBlob: result.imageUrl, isSceneVariation: result.isVariation };
-          }
-          return s;
-        })
-      );
-      const successCount = results.filter((r) => r.imageUrl).length;
-      toast({
-        title: "Génération des images terminée",
-        description: `${successCount}/${segments.length} images générées avec succès.`,
-        variant: successCount === segments.length ? "success" : "info",
-      });
+      toast({ title: "Toutes les images générées", variant: "success" });
     } finally {
       setGeneratingImages(false);
       setImageLoadingIds(new Set());
     }
   }
 
-  async function handleRegenerateImage(id: string) {
-    const index = segments.findIndex((s) => s.id === id);
-    if (index === -1) return;
-    const segment = segments[index];
-    setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt, isVariation, referenceImages } = getEffectivePrompt(index);
-    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, referenceImages, seed);
-    if (imageUrl) {
-      setSegments((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: isVariation } : s))
-      );
-      toast({ title: `Image du segment ${segment.order} régénérée`, variant: "success" });
-    }
-    setImageLoadingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  function handleDeleteSlotImage(segId: string, slotIdx: number) {
+    setSegments((prev) =>
+      prev.map((s) => {
+        if (s.id !== segId || !s.imageSlots) return s;
+        const slots = s.imageSlots.map((slot, i) => (i === slotIdx ? { ...slot, imageUrl: undefined } : slot));
+        const imageUrls = slots.map((sl) => sl.imageUrl).filter(Boolean) as string[];
+        return { ...s, imageSlots: slots, imageUrl: imageUrls[0], imageBlob: imageUrls[0], imageUrls };
+      })
+    );
   }
 
-  async function handleGenerateImageVariation(id: string) {
-    const index = segments.findIndex((s) => s.id === id);
-    if (index === -1) return;
-    const segment = segments[index];
-    setImageLoadingIds((prev) => new Set(prev).add(id));
-    const { prompt: basePrompt, referenceImages } = getEffectivePrompt(index);
-    const prompt = `${basePrompt}, slight variation, same composition, different angle`;
-    const seed = segment.order * 1000 + Math.floor(Math.random() * 999);
-    const imageUrl = await generateImageForSegment(segment, prompt, referenceImages, seed);
-    if (imageUrl) {
-      setSegments((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, imageUrl, imageBlob: imageUrl, isSceneVariation: true } : s))
-      );
-      toast({ title: `Variation générée pour le segment ${segment.order}`, variant: "success" });
-    }
-    setImageLoadingIds((prev) => {
-      const next = new Set(prev);
-      next.delete(id);
-      return next;
-    });
+  async function handleRegenerateSlot(segId: string, slotIdx: number) {
+    const segment = segments.find((s) => s.id === segId);
+    if (!segment) return;
+    const loadId = `${segId}-${slotIdx}`;
+    setImageLoadingIds((prev) => new Set(prev).add(loadId));
+    const url = await generateOneSlot(segment, slotIdx);
+    applySlotResults(segId, segment.imageSlots!.map((_, i) => (i === slotIdx ? url : null)));
+    setImageLoadingIds((prev) => { const next = new Set(prev); next.delete(loadId); return next; });
   }
 
-  function handleAudioLoaded(url: string, duration: number) {
+  async function handleRegenerateSegment(segId: string) {
+    const segment = segments.find((s) => s.id === segId);
+    if (!segment?.imageSlots?.length) return;
+    const loadIds = new Set(segment.imageSlots.map((_, i) => `${segId}-${i}`));
+    setImageLoadingIds((prev) => new Set([...prev, ...loadIds]));
+    const results = await Promise.all(segment.imageSlots.map((_, i) => generateOneSlot(segment, i)));
+    applySlotResults(segId, results);
+    setImageLoadingIds((prev) => { const next = new Set(prev); loadIds.forEach((id) => next.delete(id)); return next; });
+    toast({ title: `Segment ${segment.order} régénéré (${results.filter(Boolean).length} images)`, variant: "success" });
+  }
+
+  async function handleAnimateSlot(
+    segId: string,
+    slotIdx: number,
+    motionModel: string,
+    prompt: string,
+    motionStrength: number
+  ) {
+    const segment = segments.find((s) => s.id === segId);
+    const slot = segment?.imageSlots?.[slotIdx];
+    if (!slot?.imageUrl) {
+      toast({ title: "Pas d'image à animer", description: "Génère d'abord l'image.", variant: "error" });
+      return;
+    }
+    const loadId = `${segId}-${slotIdx}`;
+    setVideoLoadingIds((prev) => new Set(prev).add(loadId));
+    try {
+      // Étape 1 : démarrer la génération (retour rapide, évite le timeout Vercel)
+      const startRes = await fetch("/api/generate-video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageUrl: slot.imageUrl,
+          motionModel,
+          prompt,
+          motionStrength,
+          apiKey: config.leonardoApiKey || undefined,
+        }),
+      });
+      const startData = await startRes.json();
+      if (!startRes.ok) throw new Error(startData?.error ?? "Erreur au démarrage de la génération vidéo");
+      const { generationId } = startData as { generationId: string };
+
+      // Étape 2 : polling côté client toutes les 5s, max 5 minutes
+      const apiKeyParam = config.leonardoApiKey ? `&apiKey=${encodeURIComponent(config.leonardoApiKey)}` : "";
+      let videoUrl: string | undefined;
+      for (let attempt = 0; attempt < 60; attempt++) {
+        await new Promise((r) => setTimeout(r, 5000));
+        const pollRes = await fetch(`/api/generate-video/status?generationId=${generationId}${apiKeyParam}`);
+        const pollData = await pollRes.json();
+        if (!pollRes.ok) throw new Error(pollData?.error ?? "Erreur de polling");
+        if (pollData.status === "COMPLETE" && pollData.videoUrl) {
+          videoUrl = pollData.videoUrl as string;
+          break;
+        }
+        if (pollData.status === "FAILED") throw new Error("La génération vidéo a échoué côté Leonardo.");
+      }
+      if (!videoUrl) throw new Error("Délai d'attente dépassé (5 min). Réessaie.");
+
+      setSegments((prev) =>
+        prev.map((s) => {
+          if (s.id !== segId || !s.imageSlots) return s;
+          const slots = s.imageSlots.map((sl, i) =>
+            i === slotIdx ? { ...sl, motionVideoUrl: videoUrl! } : sl
+          );
+          return { ...s, imageSlots: slots };
+        })
+      );
+      toast({ title: "Animation générée !", description: "La vidéo est prête dans la carte image.", variant: "success" });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec de l'animation", description: message, variant: "error" });
+    } finally {
+      setVideoLoadingIds((prev) => { const next = new Set(prev); next.delete(loadId); return next; });
+    }
+  }
+
+  // Kept for compatibility — use handleRegenerateSegment in new UI
+  async function handleRegenerateImage(id: string) { await handleRegenerateSegment(id); }
+  function handleSegmentPromptChange(id: string, imagePrompt: string) {
+    setSegments((prev) => prev.map((s) => (s.id === id ? { ...s, imagePrompt } : s)));
+  }
+
+  async function handleAudioLoaded(url: string, duration: number, audioBuffer: AudioBuffer) {
     setVoiceoverUrl(url);
     setAudioDuration(duration);
-    const synced = syncSegmentsToAudio(segments, duration);
-    setSegments(synced);
-    toast({
-      title: "Audio synchronisé",
-      description: `${synced.length} segments synchronisés sur ${duration.toFixed(1)}s`,
-      variant: "success",
-    });
+
+    // Détecter les pauses naturelles dans l'audio pour connaître le timing EXACT de chaque phrase
+    const channelData = audioBuffer.getChannelData(0);
+    const detectedPhrases = detectPhrasesFromAudio(channelData, audioBuffer.sampleRate, duration);
+
+    // Découper le script en phrases et les caler sur les timestamps audio détectés
+    const sentences = splitScriptIntoSentences(scriptText);
+    const mappedPhrases = mapSentencesToPhrases(sentences, detectedPhrases);
+
+    // Créer les segments avec des durées EXACTES issues de l'analyse audio
+    const newSegments: VideoSegment[] = mappedPhrases.map((phrase, i) => ({
+      id: uid(),
+      order: i + 1,
+      narration: phrase.text,
+      visualDescription: "",
+      duration: Math.round((phrase.end - phrase.start) * 100) / 100,
+      imagePrompt: "",
+    }));
+
+    // Sous-titres avec timestamps exacts — chaque phrase commence et finit au bon moment
+    const exactSubtitles: SubtitleEntry[] = mappedPhrases.map((phrase) => ({
+      start: phrase.start,
+      end: phrase.end,
+      text: phrase.text,
+    }));
+
+    setSegments(newSegments);
+    setSubtitles(exactSubtitles);
+
+    // Construire les clips (1 image toutes les ~2.5s) en se basant sur l'audio
+    const newClips = buildClipsFromSegments(newSegments, beatDuration);
+    const syncedClips = syncClipsToAudio(newClips, duration);
+    setClips(syncedClips);
+
+    // Générer les prompts d'images maintenant qu'on connaît les durées exactes
+    setGeneratingPrompts(true);
+    try {
+      const withPrompts = await generateImagePrompts(newSegments);
+      setSegments(withPrompts);
+      toast({
+        title: "Audio analysé",
+        description: `${detectedPhrases.length} phrases détectées sur ${duration.toFixed(1)}s. Prompts d'images générés.`,
+        variant: "success",
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      toast({ title: "Échec des prompts d'images", description: message, variant: "error" });
+    } finally {
+      setGeneratingPrompts(false);
+    }
   }
 
-  function handleProceedToVoice() {
+  function handleProceedToImages() {
     setCurrentStep(3);
     setUnlockedStep((u) => Math.max(u, 3));
   }
 
   function handleProceedToPreview() {
+    const builtClips = buildClipsFromSegments(segments, beatDuration);
+    const finalClips = audioDuration > 0 ? syncClipsToAudio(builtClips, audioDuration) : builtClips;
+    setClips(finalClips);
+    if (subtitles.length === 0 && segments.length > 0) {
+      setSubtitles(generateSubtitlesFromClips(finalClips));
+    }
     setCurrentStep(4);
     setUnlockedStep((u) => Math.max(u, 4));
+  }
+
+  function handleProceedToVoice() {
+    // Legacy: kept for compatibility but not used in main flow anymore
+    setCurrentStep(2);
+    setUnlockedStep((u) => Math.max(u, 2));
+  }
+
+  function handleClipDurationChange(id: string, duration: number) {
+    setClips((prev) => {
+      const updated = prev.map((c) => (c.id === id ? { ...c, duration } : c));
+      setSubtitles(generateSubtitlesFromClips(updated));
+      return updated;
+    });
+  }
+
+  function handleClipTrimChange(id: string, trimStart: number, trimEnd: number | undefined) {
+    setClips((prev) => prev.map((c) => c.id === id ? { ...c, videoTrimStart: trimStart, videoTrimEnd: trimEnd } : c));
   }
 
   async function handleGenerateMetadata() {
@@ -432,6 +636,7 @@ export default function Home() {
 
   function handleProceedToExport() {
     if (!config.profile) return;
+    const projectClips = clips.length > 0 ? clips : buildClipsFromSegments(segments, beatDuration);
     const newProject: VideoProject = {
       id: uid(),
       subject: config.subject,
@@ -444,6 +649,9 @@ export default function Home() {
       imageModel,
       viralityScore: viralityScore ?? undefined,
       publishMetadata: publishMetadata ?? undefined,
+      subtitles: subtitles.length > 0 ? subtitles : generateSubtitlesFromClips(projectClips),
+      researchSources: researchSources.length > 0 ? researchSources : undefined,
+      audioDuration: audioDuration > 0 ? audioDuration : undefined,
       createdAt: new Date().toISOString(),
     };
     setProject(newProject);
@@ -490,7 +698,7 @@ export default function Home() {
             <Wand2 className="h-5 w-5" />
           </span>
           <div>
-            <h1 className="text-xl font-bold tracking-tight">StudioAI</h1>
+            <h1 className="text-xl font-bold tracking-tight gradient-text">StudioAI</h1>
             <p className="text-sm text-muted-foreground">Crée des vidéos faceless virales en 6 étapes</p>
           </div>
         </div>
@@ -517,49 +725,63 @@ export default function Home() {
           loading={generatingScript}
           progress={scriptProgress}
           viralityScore={viralityScore}
-          segments={segments}
-          onSegmentChange={handleSegmentChange}
-          onRegenerateSegment={handleRegenerateSegment}
-          regeneratingSegmentId={regeneratingSegmentId}
+          scriptText={scriptText}
+          onScriptChange={setScriptText}
           onValidate={handleValidateScript}
+          validating={validatingScript}
           validated={scriptValidated}
+          sources={researchSources}
+          targetDuration={config.duration}
         />
       )}
 
       {currentStep === 2 && (
+        <StepVoice
+          segments={segments}
+          scriptText={scriptText}
+          language={config.language as "fr" | "en"}
+          googleTtsKey={config.googleTtsKey}
+          voiceoverUrl={voiceoverUrl}
+          audioDuration={audioDuration}
+          onAudioLoaded={handleAudioLoaded}
+          generatingPrompts={generatingPrompts}
+          onProceed={handleProceedToImages}
+        />
+      )}
+
+      {currentStep === 3 && (
         <StepImages
           segments={segments}
           imageModel={imageModel}
           onImageModelChange={setImageModel}
           onGenerateAllImages={handleGenerateAllImages}
-          onRegenerateImage={handleRegenerateImage}
-          onGenerateImageVariation={handleGenerateImageVariation}
+          onRegenerateSegment={handleRegenerateSegment}
+          onRegenerateSlot={handleRegenerateSlot}
+          onImageCountChange={handleImageCountChange}
+          onSlotPromptChange={handleSlotPromptChange}
+          onSlotReferenceChange={handleSlotReferenceChange}
+          onDeleteSlotImage={handleDeleteSlotImage}
+          onAnimateSlot={(segId, slotIdx, model, prompt, strength) => handleAnimateSlot(segId, slotIdx, model, prompt, strength)}
           generatingImages={generatingImages}
           imageLoadingIds={imageLoadingIds}
-          onSegmentPromptChange={handleSegmentPromptChange}
+          videoLoadingIds={videoLoadingIds}
           leonardoApiKey={config.leonardoApiKey}
           selectedVisualStyleId={selectedVisualStyleId}
           onSelectVisualStyle={handleSelectVisualStyle}
           selectedVisualStyle={selectedVisualStyle}
-          onProceed={handleProceedToVoice}
-        />
-      )}
-
-      {currentStep === 3 && (
-        <StepVoice
-          segments={segments}
-          voiceoverUrl={voiceoverUrl}
-          audioDuration={audioDuration}
-          onAudioLoaded={handleAudioLoaded}
           onProceed={handleProceedToPreview}
         />
       )}
 
       {currentStep === 4 && (
         <StepVideo
-          segments={segments}
+          clips={clips}
           voiceoverUrl={voiceoverUrl}
           platform={config.platform}
+          subtitles={subtitles}
+          onSubtitlesChange={setSubtitles}
+          onClipDurationChange={handleClipDurationChange}
+          onClipTrimChange={handleClipTrimChange}
           onProceed={handleProceedToExport}
         />
       )}
@@ -575,5 +797,11 @@ export default function Home() {
         />
       )}
     </main>
+
+    <ApiKeyQuickEdit
+      mistralApiKey={config.mistralApiKey}
+      leonardoApiKey={config.leonardoApiKey}
+      onChange={(keys) => setConfig((prev) => ({ ...prev, ...keys }))}
+    />
   );
 }

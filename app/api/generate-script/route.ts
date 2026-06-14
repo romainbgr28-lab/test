@@ -3,6 +3,7 @@ import {
   buildScriptSystemPrompt,
   callMistralChat,
   callMistralWithWebSearch,
+  groundScriptToResearch,
   extractJson,
 } from "@/lib/mistral";
 import type { Language, Platform, ViralityScore } from "@/types";
@@ -10,16 +11,9 @@ import type { Language, Platform, ViralityScore } from "@/types";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-interface RawSegment {
-  order: number;
-  narration: string;
-  visualDescription: string;
-  duration: number;
-}
-
 interface ScriptResponse {
   viralityScore: ViralityScore;
-  segments: RawSegment[];
+  script: string;
 }
 
 const MAX_ITERATIONS = 4;
@@ -87,8 +81,6 @@ export async function POST(request: Request) {
     duration,
     model,
     apiKey,
-    regenerateSegmentOrder,
-    existingSegment,
   } = body as {
     subject: string;
     sourceContent?: string;
@@ -99,8 +91,6 @@ export async function POST(request: Request) {
     duration: number;
     model: string;
     apiKey?: string;
-    regenerateSegmentOrder?: number;
-    existingSegment?: RawSegment;
   };
 
   const key = apiKey || process.env.MISTRAL_API_KEY;
@@ -116,35 +106,6 @@ export async function POST(request: Request) {
   }
 
   const systemPrompt = buildScriptSystemPrompt({ platform, language, scriptInstructions, viralityInstructions, duration, subject });
-
-  // Régénération d'un segment unique : pas de recherche web ni de boucle, réponse JSON classique.
-  if (regenerateSegmentOrder && existingSegment) {
-    try {
-      const userPrompt = `Régénère uniquement le segment numéro ${regenerateSegmentOrder} de ce script (sujet global : "${subject}"). Voici le segment actuel à améliorer :
-Narration : ${existingSegment.narration}
-Description visuelle : ${existingSegment.visualDescription}
-Durée : ${existingSegment.duration}s
-
-Renvoie un unique objet JSON pour ce segment au format :
-{ "order": ${regenerateSegmentOrder}, "narration": "...", "visualDescription": "...", "duration": ${existingSegment.duration} }
-Aucun texte avant ou après le JSON.`;
-
-      const raw = await callMistralChat({
-        apiKey: key,
-        model,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userPrompt },
-        ],
-      });
-      const segment = extractJson<RawSegment>(raw);
-      return NextResponse.json({ segment });
-    } catch (error) {
-      console.error("Erreur /api/generate-script (régénération segment) :", error);
-      const message = error instanceof Error ? error.message : "Erreur inconnue";
-      return NextResponse.json({ error: `Échec de la régénération du segment : ${message}` }, { status: 500 });
-    }
-  }
 
   const platformLabel = PLATFORM_LABELS[platform];
   const languageLabel = LANGUAGE_LABELS[language];
@@ -173,13 +134,27 @@ Aucun texte avant ou après le JSON.`;
           const researchQuery = `Sujet à rechercher : "${subject}".
 Contexte / niche : ${scriptInstructions}
 Plateforme cible : ${platformLabel}.
+Date du jour : ${new Date().toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}.
 
-Effectue plusieurs recherches web et rédige une NOTE DE RECHERCHE dense et factuelle (pas un script, pas de JSON) contenant :
-- 6 à 10 faits, chiffres et statistiques RÉCENTS et vérifiables (précise l'ordre de grandeur, l'année et la source quand c'est possible)
-- les angles, accroches et tendances qui fonctionnent actuellement sur ce sujet
-- des exemples concrets, anecdotes ou cas réels marquants
-- les idées reçues à casser ou les vérités contre-intuitives
-N'invente aucune donnée : tout doit provenir de tes recherches.`;
+ÉTAPE 1 — VÉRIFICATION DE L'ÉTAT ACTUEL (obligatoire avant tout autre chose) :
+Identifie toutes les personnes, équipes, entreprises, produits ou événements mentionnés dans le sujet.
+Pour chacun, effectue une recherche web SPÉCIFIQUE pour confirmer :
+- Si c'est un sportif : équipe actuelle, statut (actif/blessé/retraité), derniers résultats
+- Si c'est une entreprise : statut actuel, dernière actualité significative
+- Si c'est un événement : est-il passé, en cours ou à venir ?
+- Si c'est une statistique : date de publication, source officielle
+IMPORTANT : si une information ne peut pas être vérifiée, ne l'utilise PAS dans la note.
+
+ÉTAPE 2 — COLLECTE DES FAITS (après vérification) :
+Rédige une NOTE DE RECHERCHE dense et factuelle (pas un script, pas de JSON) contenant :
+- 6 à 10 faits, chiffres et statistiques CONFIRMÉS par tes recherches (précise la date et la source)
+- L'état ACTUEL et VÉRIFIÉ de chaque élément clé mentionné dans le sujet
+- Les angles et tendances qui fonctionnent sur ${platformLabel} EN CE MOMENT
+- Des exemples concrets, anecdotes ou cas réels récents (moins de 6 mois si possible)
+- Les idées reçues à casser ou les vérités contre-intuitives VÉRIFIÉES
+- Signal d'alerte : si tu trouves que certaines prémisses du sujet sont fausses (joueur transféré, entreprise coulée, record battu…), INDIQUE-LE CLAIREMENT en début de note.
+
+N'invente AUCUNE donnée : tout ce qui figure dans la note doit provenir de tes recherches actuelles.`;
 
           try {
             const result = await withHeartbeat(
@@ -196,14 +171,12 @@ N'invente aucune donnée : tout doit provenir de tes recherches.`;
             }
             if (result.sources.length > 0) {
               send({ type: "status", message: `${result.sources.length} source(s) web consultée(s).` });
+              send({ type: "sources", sources: result.sources });
             }
           } catch (searchError) {
-            console.error("Recherche web Mistral indisponible, repli sans recherche :", searchError);
-            send({
-              type: "status",
-              message: "Recherche web indisponible : rédaction avec les connaissances du modèle.",
-            });
-            researchBrief = "";
+            console.error("Recherche web Mistral indisponible :", searchError);
+            const errMsg = searchError instanceof Error ? searchError.message : String(searchError);
+            throw new Error(`Recherche web échouée : impossible de générer un script fiable sans données vérifiées. Détail : ${errMsg}`);
           }
         }
 
@@ -236,7 +209,11 @@ Rédige le script complet en t'appuyant sur ces informations : intègre les chif
 - Clarté du CTA : ${previous!.viralityScore.ctaClarity}
 - Suggestions à appliquer impérativement : ${previous!.viralityScore.suggestions.join(" / ")}
 ${briefBlock}
-Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles, en continuant de t'appuyer sur les informations factuelles ci-dessus. Ne te contente pas de reformuler : approfondis, muscle chaque segment et vise un score de 100/100. Réponds uniquement avec le JSON demandé.`;
+Voici le script précédent :
+"""
+${previous!.script}
+"""
+Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles, en continuant de t'appuyer sur les informations factuelles ci-dessus. Ne te contente pas de reformuler : approfondis, muscle le script et vise un score de 100/100. Réponds uniquement avec le JSON demandé.`;
           }
 
           const rawText = await withHeartbeat(
@@ -255,7 +232,7 @@ Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles,
           send({ type: "status", iteration, message: "Analyse du script et calcul du score de viralité..." });
 
           const parsed = extractJson<ScriptResponse>(rawText);
-          if (!parsed.segments || !Array.isArray(parsed.segments) || parsed.segments.length === 0) {
+          if (!parsed.script || typeof parsed.script !== "string" || parsed.script.trim().length === 0) {
             throw new Error("Le script généré est invalide. Réessaie.");
           }
 
@@ -291,8 +268,20 @@ Réécris ENTIÈREMENT un script amélioré qui corrige tous ces points faibles,
           throw new Error("Le script généré est invalide. Réessaie.");
         }
 
+        // Fact-grounding uniquement sur la meilleure version finale
+        if (researchBrief) {
+          send({ type: "status", message: "Vérification factuelle : suppression des détails non confirmés par la recherche..." });
+          const groundedScript = await groundScriptToResearch({
+            apiKey: key,
+            model,
+            script: best.script,
+            researchBrief,
+          });
+          best = { ...best, script: groundedScript.trim() };
+        }
+
         send({ type: "status", message: "Script finalisé !" });
-        send({ type: "result", viralityScore: best.viralityScore, segments: best.segments });
+        send({ type: "result", viralityScore: best.viralityScore, script: best.script });
       } catch (error) {
         console.error("Erreur /api/generate-script :", error);
         const message = error instanceof Error ? error.message : "Erreur inconnue";

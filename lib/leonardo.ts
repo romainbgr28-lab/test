@@ -213,6 +213,98 @@ export interface LeonardoGenerationResult {
   apiCreditCost?: number;
 }
 
+export interface LeonardoVideoResult {
+  videoUrl: string;
+  apiCreditCost?: number;
+}
+
+export const VIDEO_MODELS = [
+  { id: "SVD",       name: "SVD Motion",      description: "Stable Video Diffusion — mouvement fluide, sans prompt, intensité réglable" },
+  { id: "MOTION2",   name: "Motion 2",         description: "Leonardo Motion v2 — animation rapide, prompt optionnel" },
+  { id: "VEO3FAST",  name: "VEO 3 Fast",       description: "Google VEO 3 Fast — dirigé par prompt, rapide et abordable" },
+  { id: "VEO3",      name: "VEO 3 (qualité)",  description: "Google VEO 3 — haute qualité, prompt obligatoire" },
+] as const;
+
+export type VideoModelId = typeof VIDEO_MODELS[number]["id"];
+
+// Démarre une génération vidéo et retourne immédiatement le generationId.
+// Le polling est géré côté client pour éviter les timeouts Vercel (<60s).
+export async function startVideoGeneration(params: {
+  imageDataUrl: string;
+  apiKey: string;
+  motionModel?: string;
+  prompt?: string;
+  motionStrength?: number;
+}): Promise<{ generationId: string; apiCreditCost?: number }> {
+  const { imageDataUrl, apiKey, motionModel = "SVD", prompt = "", motionStrength = 4 } = params;
+
+  const imageId = await uploadInitImage(apiKey, imageDataUrl);
+
+  if (motionModel === "SVD") {
+    const res = await fetch(`${LEONARDO_BASE}/generations-motion-svd`, {
+      method: "POST",
+      headers: authHeaders(apiKey),
+      body: JSON.stringify({ imageId, isInitImage: true, motionStrength, isPublic: false }),
+    });
+    const data = await res.json().catch(() => null);
+    if (!res.ok) throw new Error(data?.error ?? data?.message ?? "Échec SVD Motion.");
+    const generationId: string | undefined =
+      data?.motionSvdGenerationJob?.generationId ?? data?.sdGenerationJob?.generationId;
+    if (!generationId) throw new Error(`SVD: generationId introuvable. Réponse: ${JSON.stringify(data)}`);
+    return { generationId, apiCreditCost: data?.motionSvdGenerationJob?.apiCreditCost };
+  }
+
+  // Tous les autres modèles (MOTION2, VEO3, VEO3FAST) via /generations-image-to-video
+  if (!prompt.trim()) throw new Error("Un prompt est requis pour ce modèle.");
+  const res = await fetch(`${LEONARDO_BASE}/generations-image-to-video`, {
+    method: "POST",
+    headers: authHeaders(apiKey),
+    body: JSON.stringify({
+      imageId,
+      imageType: "UPLOADED",
+      model: motionModel,
+      prompt: prompt.trim(),
+      resolution: "RESOLUTION_720",
+      frameInterpolation: true,
+      promptEnhance: false,
+      isPublic: false,
+    }),
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) {
+    const msg = data?.error ?? data?.message ?? JSON.stringify(data);
+    throw new Error(msg || "Échec image-to-video.");
+  }
+  const generationId: string | undefined =
+    data?.motionVideoGenerationJob?.generationId ??
+    data?.sdGenerationJob?.generationId ??
+    data?.generationId;
+  if (!generationId) throw new Error(`generationId introuvable. Réponse: ${JSON.stringify(data)}`);
+  return { generationId, apiCreditCost: data?.motionVideoGenerationJob?.apiCreditCost };
+}
+
+// Interroge le statut d'une génération vidéo.
+// Retourne { status: "PENDING"|"COMPLETE"|"FAILED", videoUrl? }
+export async function pollVideoGeneration(
+  generationId: string,
+  apiKey: string
+): Promise<{ status: string; videoUrl?: string }> {
+  const res = await fetch(`${LEONARDO_BASE}/generations/${generationId}`, {
+    headers: authHeaders(apiKey),
+    cache: "no-store",
+  });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new Error(data?.error ?? "Erreur polling vidéo.");
+  const gen = data?.generations_by_pk;
+  const status: string = gen?.status ?? "PENDING";
+  if (status === "COMPLETE") {
+    const videoUrl: string | undefined = gen?.generated_images?.[0]?.motionMP4URL;
+    if (!videoUrl) throw new Error("Génération COMPLETE mais aucune URL vidéo.");
+    return { status: "COMPLETE", videoUrl };
+  }
+  return { status };
+}
+
 export async function generateImageWithLeonardo(params: {
   prompt: string;
   apiKey: string;
@@ -339,14 +431,17 @@ export async function generateImageWithLeonardoV2(params: {
   }
 
   const generationId: string | undefined =
+    data?.generate?.generationId ??
     data?.sdGenerationJob?.generationId ??
     data?.generations_by_pk?.id ??
     data?.generationId ??
-    data?.id;
+    data?.id ??
+    data?.generation?.id;
   if (!generationId) {
     throw new Error("Réponse inattendue de Leonardo (identifiant de génération manquant).");
   }
-  const apiCreditCost: number | undefined = data?.sdGenerationJob?.apiCreditCost ?? data?.apiCreditCost;
+  const apiCreditCost: number | undefined =
+    data?.generate?.apiCreditCost ?? data?.sdGenerationJob?.apiCreditCost ?? data?.apiCreditCost;
 
   const imageUrl = await pollGeneration(generationId, apiKey);
 
