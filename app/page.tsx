@@ -23,7 +23,8 @@ import { StepVoice } from "./components/steps/StepVoice";
 import { StepVideo } from "./components/steps/StepVideo";
 import { StepExport } from "./components/steps/StepExport";
 import { useToast } from "./components/ui/Toast";
-import { uid } from "@/lib/utils";
+import { ApiKeyQuickEdit } from "./components/ui/ApiKeyQuickEdit";
+import { uid, compressImageDataUrl } from "@/lib/utils";
 import { estimateCost, estimateVoiceCost, formatEur, formatPollen } from "@/lib/cost-calculator";
 import { buildSceneContinuityPrompt, buildSubSegmentPrompts, getDimensionsForPlatform } from "@/lib/pollinations";
 import { syncSegmentsToAudio } from "@/lib/sync";
@@ -320,9 +321,14 @@ export default function Home() {
     if (!slot) return null;
     const dimensions = getDimensionsForPlatform(config.platform);
     const styleRefs = selectedVisualStyle?.referenceImages?.length ? selectedVisualStyle.referenceImages : [];
-    const refImages = slot.referenceImage ? [slot.referenceImage, ...styleRefs] : styleRefs.length ? styleRefs : undefined;
+    const rawRefs = slot.referenceImage ? [slot.referenceImage, ...styleRefs] : styleRefs.length ? styleRefs : undefined;
     const seed = segment.order * 1000 + slotIdx * 137;
     try {
+      // Compress reference images before sending to avoid 413 Payload Too Large
+      const referenceImages = rawRefs
+        ? await Promise.all(rawRefs.map((r) => compressImageDataUrl(r)))
+        : undefined;
+
       const response = await fetch("/api/generate-image", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -333,11 +339,27 @@ export default function Home() {
           height: dimensions.height,
           seed,
           apiKey: config.leonardoApiKey || undefined,
-          referenceImages: refImages,
+          referenceImages,
         }),
       });
       const data = await response.json();
-      if (!response.ok) throw new Error(data?.error ?? "Erreur génération image");
+      if (!response.ok) {
+        const raw: string = data?.error ?? "Erreur génération image";
+        // Make common HTTP errors more readable
+        const msg =
+          response.status === 413
+            ? "L'image de référence est trop volumineuse même après compression. Essaie avec une image plus petite."
+            : response.status === 401
+            ? "Clé API Leonardo invalide ou manquante. Vérifie ta clé dans les paramètres (bouton clé en bas à droite)."
+            : response.status === 402
+            ? "Crédits Leonardo insuffisants. Recharge ton compte sur app.leonardo.ai."
+            : response.status === 429
+            ? "Limite de requêtes Leonardo atteinte. Attends quelques secondes et réessaie."
+            : response.status === 502
+            ? `Erreur côté Leonardo (${response.status}) : ${raw}`
+            : raw;
+        throw new Error(msg);
+      }
       return data.imageUrl as string;
     } catch (error) {
       const message = error instanceof Error ? error.message : "Erreur inconnue";
@@ -775,5 +797,11 @@ export default function Home() {
         />
       )}
     </main>
+
+    <ApiKeyQuickEdit
+      mistralApiKey={config.mistralApiKey}
+      leonardoApiKey={config.leonardoApiKey}
+      onChange={(keys) => setConfig((prev) => ({ ...prev, ...keys }))}
+    />
   );
 }
