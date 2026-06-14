@@ -155,7 +155,6 @@ Rédige une NOTE DE RECHERCHE dense et factuelle (pas un script, pas de JSON) co
 - Signal d'alerte : si tu trouves que certaines prémisses du sujet sont fausses (joueur transféré, entreprise coulée, record battu…), INDIQUE-LE CLAIREMENT en début de note.
 
 N'invente AUCUNE donnée : tout ce qui figure dans la note doit provenir de tes recherches actuelles.`;
-`;
 
           try {
             const result = await withHeartbeat(
