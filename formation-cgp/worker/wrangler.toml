@@ -1,0 +1,7 @@
+name = "formation-cgp-proxy"
+main = "src/index.js"
+compatibility_date = "2026-07-01"
+
+# La clé API Mistral n'est PAS mise ici : c'est un secret injecté via
+#   npx wrangler secret put MISTRAL_API_KEY
+# Elle est ensuite disponible dans le Worker via env.MISTRAL_API_KEY.
